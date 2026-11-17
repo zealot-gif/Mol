@@ -565,6 +565,125 @@ window.addEventListener("mouseup", (e) => {
   draw();
 });
 
+// === 手機觸控支援（單指繪圖 + 雙指旋轉與縮放） ===
+let isTwoFingerGesture = false;
+let lastTouchAngle = 0;
+let lastTouchDist = 0;
+
+function getTouchPos(touch) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (touch.clientX - rect.left - rect.width / 2) / zoom + rect.width / 2,
+    y: (touch.clientY - rect.top - rect.height / 2) / zoom + rect.height / 2
+  };
+}
+
+canvas.addEventListener("touchstart", (e) => {
+  e.preventDefault(); // 防止滑動畫布時整個網頁跟著上下捲動
+
+  // 雙指觸控：啟動「旋轉 + 縮放」模式
+  if (e.touches.length === 2) {
+    isTwoFingerGesture = true;
+    dragStartAtom = null;
+    dragArrowStart = null;
+    dragPos = null;
+
+    if (atoms.length > 0) {
+      saveState();
+      rotateCenter = {
+        x: atoms.reduce((sum, a) => sum + a.x, 0) / atoms.length,
+        y: atoms.reduce((sum, a) => sum + a.y, 0) / atoms.length
+      };
+    }
+
+    const t1 = e.touches[0];
+    const t2 = e.touches[1];
+    lastTouchAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
+    lastTouchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+    return;
+  }
+
+  // 單指觸控：模擬滑鼠左鍵按下
+  if (e.touches.length === 1 && !isTwoFingerGesture) {
+    const t = e.touches[0];
+    canvas.dispatchEvent(new MouseEvent("mousedown", {
+      clientX: t.clientX,
+      clientY: t.clientY,
+      button: 0
+    }));
+  }
+}, { passive: false });
+
+canvas.addEventListener("touchmove", (e) => {
+  e.preventDefault();
+
+  // 雙指移動：計算旋轉角度差與縮放比例
+  if (e.touches.length === 2 && isTwoFingerGesture) {
+    const t1 = e.touches[0];
+    const t2 = e.touches[1];
+
+    // 1. 旋轉結構
+    const currentAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
+    const deltaAngle = currentAngle - lastTouchAngle;
+    lastTouchAngle = currentAngle;
+
+    if (atoms.length > 0) {
+      const cos = Math.cos(deltaAngle);
+      const sin = Math.sin(deltaAngle);
+
+      atoms.forEach((a) => {
+        const dx = a.x - rotateCenter.x;
+        const dy = a.y - rotateCenter.y;
+        a.x = rotateCenter.x + dx * cos - dy * sin;
+        a.y = rotateCenter.y + dx * sin + dy * cos;
+      });
+
+      arrows.forEach((arr) => {
+        const dx1 = arr.x1 - rotateCenter.x;
+        const dy1 = arr.y1 - rotateCenter.y;
+        arr.x1 = rotateCenter.x + dx1 * cos - dy1 * sin;
+        arr.y1 = rotateCenter.y + dx1 * sin + dy1 * cos;
+
+        const dx2 = arr.x2 - rotateCenter.x;
+        const dy2 = arr.y2 - rotateCenter.y;
+        arr.x2 = rotateCenter.x + dx2 * cos - dy2 * sin;
+        arr.y2 = rotateCenter.y + dx2 * sin + dy2 * cos;
+      });
+    }
+
+    // 2. 雙指開合縮放
+    const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+    if (lastTouchDist > 0) {
+      const scaleRatio = currentDist / lastTouchDist;
+      zoom = Math.max(0.4, Math.min(2.5, zoom * scaleRatio));
+      document.getElementById("zoomBadge").textContent = `${Math.round(zoom * 100)}%`;
+    }
+    lastTouchDist = currentDist;
+
+    draw();
+    return;
+  }
+
+  // 單指拖曳：模擬滑鼠移動
+  if (e.touches.length === 1 && !isTwoFingerGesture) {
+    const t = e.touches[0];
+    canvas.dispatchEvent(new MouseEvent("mousemove", {
+      clientX: t.clientX,
+      clientY: t.clientY
+    }));
+  }
+}, { passive: false });
+
+canvas.addEventListener("touchend", (e) => {
+  if (e.touches.length === 0) {
+    if (!isTwoFingerGesture) {
+      window.dispatchEvent(new MouseEvent("mouseup", { button: 0 }));
+    }
+    isTwoFingerGesture = false;
+    lastTouchDist = 0;
+  }
+});
+
 function addRingAt(center, type, attachAtom) {
   const sides = type === "cyclopentane" ? 5 : 6;
   const radius = 36;
