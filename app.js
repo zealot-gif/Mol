@@ -6,10 +6,8 @@ let currentSdfData = "";
 function jsmeOnLoad() {
   setTimeout(() => {
     jsmeApplet = new JSApplet.JSME("jsme_container", "100%", "100%", {
-      // 移除 oldlook，改用現代扁平化圖示與原子色彩
-      options: "newlook,star,atommovebutton,guicolor=#131c31",
-      // 設定化學結構繪圖背景為深色，讓白線與彩色原子發光
-      canvasBg: "#0f172a"
+      options: "newlook,star,atommovebutton",
+      guicolor: "#1e293b"
     });
     const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
     jsmeApplet.readGenericMolecularInput(defaultSmiles);
