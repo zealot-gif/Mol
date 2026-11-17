@@ -6,12 +6,14 @@
   <title>MolView Studio - 2D/3D 分子實驗室</title>
   <link rel="stylesheet" href="style.css" />
 
+  <!-- Kekule.js 樣式與核心腳本 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/kekule@1.0.2/dist/themes/default/kekule.css" />
+  <script src="https://cdn.jsdelivr.net/npm/kekule@1.0.2/dist/kekule.min.js"></script>
+
   <!-- 3Dmol.js 渲染引擎 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js"></script>
   <!-- OpenChemLib JS (本地 3D 構象計算) -->
   <script src="https://cdn.jsdelivr.net/npm/openchemlib@8.14.0/dist/openchemlib-full.js"></script>
-  <!-- JSME 2D 化學繪圖器 (純 JS 本地運行，免 Iframe 限制) -->
-  <script src="https://jsme-editor.github.io/dist/jsme/jsme.nocache.js"></script>
 </head>
 <body>
   <header class="toolbar">
@@ -41,13 +43,13 @@
   </header>
 
   <main class="workspace">
-    <!-- 左側：2D 化學結構繪圖器 -->
+    <!-- 左側：Kekule.js 現代 2D 化學結構繪圖器 -->
     <section class="panel left-panel">
       <div class="panel-header">
-        <span>2D 化學結構繪製區</span>
+        <span>2D 化學結構繪製區 (Kekule.js)</span>
         <span class="hint">繪製後點擊上方「2D 轉 3D」自動生成</span>
       </div>
-      <div id="jsme_container"></div>
+      <div id="kekule_composer"></div>
     </section>
 
     <!-- 右側：3D 視覺化與資訊卡片 -->
