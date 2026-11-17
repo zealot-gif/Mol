@@ -80,19 +80,33 @@ html, body {
 }
 .panel-header .hint { color: #38bdf8; }
 
-/* Kekule 繪圖器無邊框撐滿容器 */
+/* === 美化 Kekule 2D 繪圖區：暗黑化濾鏡 + 隱藏外框與捲軸 === */
 #kekule_composer {
-  flex: 1;
-  width: 100%;
-  height: 100%;
+  flex: 1; width: 100%; height: 100%;
   min-height: 360px;
   border: none !important;
-  background: #ffffff;
+  background: #0f172a !important;
+  overflow: hidden !important;
 }
+
 .K-Chem-Composer {
   border: none !important;
   width: 100% !important;
   height: 100% !important;
+  background: transparent !important;
+  /* 將淺灰工具列與白底畫布反轉為與網站一致的深午夜藍，線條自動變發光亮白 */
+  filter: invert(0.91) hue-rotate(190deg) contrast(1.08) !important;
+}
+
+/* 隱藏 Kekule 內部多餘的檔案上傳框與系統捲軸 */
+input[type="file"],
+.K-File-Input {
+  display: none !important;
+}
+
+.K-Chem-Editor-Container {
+  overflow: hidden !important;
+  border: none !important;
 }
 
 #viewer_3d { flex: 1; width: 100%; height: 100%; position: relative; }
