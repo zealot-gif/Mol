@@ -6,7 +6,8 @@ let currentSdfData = "";
 function jsmeOnLoad() {
   setTimeout(() => {
     jsmeApplet = new JSApplet.JSME("jsme_container", "100%", "100%", {
-      options: "newlook,star,atommovebutton",
+      // 加入 noinfo 隱藏左上角黃色笑臉與右側藍色 i 按鈕
+      options: "newlook,star,atommovebutton,noinfo",
       guicolor: "#1e293b"
     });
     const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
