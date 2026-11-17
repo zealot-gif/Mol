@@ -5,13 +5,13 @@ html, body {
   background: #ffffff;
   color: #1e293b;
   overflow: hidden;
+  user-select: none;
 }
 
 .app-container {
   display: flex; width: 100%; height: 100%;
 }
 
-/* 左側 2D 畫布區塊 */
 .editor-pane {
   flex: 1.15; position: relative; height: 100%;
   background: #ffffff;
@@ -19,26 +19,15 @@ html, body {
   overflow: hidden;
 }
 
-/* 隱藏 Kekule 原生醜陋工具列與外框，只保留純淨畫布 */
-#kekule_canvas {
+#molCanvas {
   width: 100%; height: 100%;
-}
-.K-Chem-Composer {
-  border: none !important;
-  background: #ffffff !important;
-}
-.K-Chem-Editor-Container {
-  border: none !important;
-  background: #ffffff !important;
-}
-.K-Toolbar, .K-Chem-Composer-Toolbar, input[type="file"] {
-  display: none !important;
+  display: block; cursor: crosshair;
 }
 
-/* 原版 MolView 懸浮工具島通用樣式 */
+/* 原版 MolView 懸浮工具島 */
 .floating-bar, .floating-dock, .zoom-badge {
   position: absolute;
-  background: rgba(248, 250, 252, 0.92);
+  background: rgba(248, 250, 252, 0.94);
   backdrop-filter: blur(8px);
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -46,7 +35,6 @@ html, body {
   z-index: 20;
 }
 
-/* 頂部第一排工具島 */
 .top-menu {
   top: 12px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 4px; padding: 4px 8px;
@@ -56,7 +44,7 @@ html, body {
 .menu-btn {
   background: transparent; border: none; padding: 5px 10px;
   border-radius: 6px; font-size: 0.84rem; font-weight: 500;
-  color: #334155; cursor: pointer; transition: background 0.15s;
+  color: #334155; cursor: pointer;
 }
 .menu-btn:hover { background: #e2e8f0; }
 .menu-btn.active { background: #e0f2fe; color: #0369a1; font-weight: 600; }
@@ -69,10 +57,9 @@ html, body {
   border-radius: 6px; padding: 3px 8px;
 }
 .search-wrap input {
-  border: none; outline: none; font-size: 0.82rem; width: 135px; color: #0f172a;
+  border: none; outline: none; font-size: 0.82rem; width: 125px; color: #0f172a;
 }
 
-/* 頂部第二排編輯工具島 */
 .sub-menu {
   top: 56px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 2px; padding: 3px 6px;
@@ -82,10 +69,10 @@ html, body {
   border-radius: 5px; font-size: 0.95rem; color: #334155; cursor: pointer;
 }
 .tool-icon:hover { background: #e2e8f0; }
+.tool-icon.active { background: #bae6fd; color: #0369a1; }
 .tool-icon.danger:hover { background: #fee2e2; color: #dc2626; }
 .divider { width: 1px; height: 18px; background: #cbd5e1; margin: 0 4px; }
 
-/* 左右直立工具島 */
 .floating-dock {
   top: 50%; transform: translateY(-50%);
   display: flex; flex-direction: column; gap: 2px; padding: 4px;
@@ -99,19 +86,14 @@ html, body {
   color: #334155; cursor: pointer; display: flex; align-items: center; justify-content: center;
 }
 .dock-btn:hover, .atom-btn:hover { background: #e2e8f0; }
-/* 原版 MolView 選中時的招牌淺天藍色高亮 */
-.dock-btn.active, .atom-btn.active {
-  background: #bae6fd; color: #0369a1;
-}
+.dock-btn.active, .atom-btn.active { background: #bae6fd; color: #0369a1; }
 .h-divider { height: 1px; width: 22px; background: #cbd5e1; margin: 3px auto; }
 
-/* 左下角縮放倍率標籤 */
 .zoom-badge {
   bottom: 12px; left: 12px;
   padding: 4px 10px; font-size: 0.8rem; font-weight: 600; color: #475569;
 }
 
-/* 右側 3D 分子視窗 */
 .viewer-pane {
   flex: 1; position: relative; height: 100%;
   background: #0f172a;
@@ -140,11 +122,10 @@ html, body {
 .badge.cloud { background: rgba(56, 189, 248, 0.2); color: #38bdf8; }
 .badge.local { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
 
-/* 窄螢幕自適應 */
 @media (max-width: 900px) {
   html, body { overflow-y: auto; height: auto; }
   .app-container { flex-direction: column; height: auto; }
-  .editor-pane { height: 480px; flex: none; border-right: none; border-bottom: 1px solid #cbd5e1; }
-  .viewer-pane { height: 400px; flex: none; }
+  .editor-pane { height: 460px; flex: none; border-right: none; border-bottom: 1px solid #cbd5e1; }
+  .viewer-pane { height: 380px; flex: none; }
   .top-menu { max-width: 95%; overflow-x: auto; }
 }
