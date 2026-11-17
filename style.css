@@ -107,52 +107,18 @@ html, body {
   .workspace { flex-direction: column; height: auto; }
   .panel { height: 420px; flex: none; }
 }
-/* === 美化 JSME 2D 繪圖器工具列 === */
+/* === 強制將 JSME 工具列轉換為暗黑科技風 === */
 #jsme_container {
   background: #0f172a !important;
   padding: 6px;
 }
 
-/* 覆寫 JSME 內建 GWT 按鈕與工具列外框 */
-#jsme_container table {
-  border-collapse: separate !important;
-  border-spacing: 3px !important;
-  background-color: #131c31 !important;
+/* 針對 JSME 上方與左側的 Canvas 工具列套用暗色反轉濾鏡 */
+#jsme_container canvas {
+  border-radius: 6px;
 }
 
-#jsme_container td {
-  border: none !important;
-  border-radius: 6px !important;
-  transition: all 0.15s ease !important;
-}
-
-/* 工具列按鈕本體（深藍玻璃感 + 圓角） */
-#jsme_container .gwt-ToggleButton,
-#jsme_container .gwt-PushButton,
-#jsme_container td[style*="border"] {
-  background: #1e293b !important;
-  border: 1px solid rgba(148, 163, 184, 0.22) !important;
-  border-radius: 6px !important;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25) !important;
-}
-
-/* 滑鼠移過按鈕時的微光效果 */
-#jsme_container .gwt-ToggleButton:hover,
-#jsme_container .gwt-PushButton:hover {
-  background: #334155 !important;
-  border-color: #38bdf8 !important;
-  transform: translateY(-1px);
-}
-
-/* 選中工具時的高亮狀態（琥珀金或天藍光暈） */
-#jsme_container .gwt-ToggleButton-down,
-#jsme_container .gwt-ToggleButton-down-hovering {
-  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
-  border-color: #60a5fa !important;
-  box-shadow: 0 0 10px rgba(59, 130, 246, 0.5) !important;
-}
-
-/* 隱藏右下角多餘的藍色三角形拖曳角標 */
-#jsme_container img[src*="triangle"] {
-  opacity: 0.3;
+/* JSME 結構中，前幾個 canvas 是工具列，最後一個最大的才是繪圖畫布 */
+#jsme_container div > canvas:not(:last-child) {
+  filter: invert(0.88) hue-rotate(185deg) saturate(1.4) contrast(1.1) !important;
 }
