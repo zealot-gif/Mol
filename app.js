@@ -728,8 +728,15 @@ async function processMolecule(query, isName = false) {
       formulaEl.textContent = `${props.MolecularFormula} (${props.MolecularWeight})`;
       infoEl.textContent = `${searchQuery} ｜ ${props.IUPACName || ""}`;
 
-      if (isName && props.CanonicalSMILES) {
-        loadSmilesTo2D(props.CanonicalSMILES);
+      // 同步繪製左側 2D 畫布（相容 PubChem 所有 SMILES 欄位或直接由 3D 結構轉換）
+      if (isName) {
+        const smilesStr = props.CanonicalSMILES || props.ConnectivitySMILES || props.SMILES;
+        if (smilesStr) {
+          loadSmilesTo2D(smilesStr);
+        } else if (typeof OCL !== "undefined") {
+          const fallbackMol = OCL.Molecule.fromMolfile(currentSdfData);
+          loadSmilesTo2D(fallbackMol.toSmiles());
+        }
       }
       render3DModel(currentSdfData);
       return;
