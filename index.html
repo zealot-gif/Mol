@@ -3,14 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MolView Studio - 2D/3D 分子實驗室</title>
+  <title>MolView Studio - 2D/3D 分子實驗室 (Ketcher 版)</title>
   <link rel="stylesheet" href="style.css" />
+  
+  <!-- Ketcher Standalone CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/ketcher-standalone@2.24.0/dist/ketcher.css" />
+  <script src="https://unpkg.com/ketcher-standalone@2.24.0/dist/ketcher.js"></script>
+
   <!-- 3Dmol.js 渲染引擎 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js"></script>
-  <!-- OpenChemLib JS (改用 jsDelivr 穩定 CDN) -->
+  <!-- OpenChemLib JS (本地 3D 構象計算) -->
   <script src="https://cdn.jsdelivr.net/npm/openchemlib@8.14.0/dist/openchemlib-full.js"></script>
-  <!-- JSME 2D 化學繪圖器 -->
-  <script src="https://jsme-editor.github.io/dist/jsme/jsme.nocache.js"></script>
 </head>
 <body>
   <header class="toolbar">
@@ -40,13 +43,13 @@
   </header>
 
   <main class="workspace">
-    <!-- 左側：2D 繪圖面板 -->
+    <!-- 左側：Ketcher 2D 化學結構繪圖器 -->
     <section class="panel left-panel">
       <div class="panel-header">
-        <span>2D 化學結構繪製區</span>
+        <span>2D 化學結構繪製區 (Ketcher)</span>
         <span class="hint">支援任意自創結構本地演算</span>
       </div>
-      <div id="jsme_container"></div>
+      <div id="ketcher-root"></div>
     </section>
 
     <!-- 右側：3D 視覺化與資訊卡片 -->
@@ -57,7 +60,7 @@
           <span id="sourceBadge" class="badge badge-cloud">待命</span>
           <span id="molFormula" class="formula-tag">—</span>
         </div>
-        <div id="molInfo" class="info-text">請在左側繪製結構並點擊「2D 轉 3D」</div>
+        <div id="molInfo" class="info-text">正在初始化 Ketcher 繪圖引擎...</div>
       </div>
     </section>
   </main>
