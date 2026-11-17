@@ -4,13 +4,15 @@ let currentSdfData = "";
 
 // 1. JSME 初始化
 function jsmeOnLoad() {
-  jsmeApplet = new JSApplet.JSME("jsme_container", "100%", "100%", {
-    options: "oldlook,star,atommovebutton"
-  });
-  const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
-  jsmeApplet.readGenericMolecularInput(defaultSmiles);
-  init3DViewer();
-  processMolecule(defaultSmiles, false);
+  setTimeout(() => {
+    jsmeApplet = new JSApplet.JSME("jsme_container", "100%", "100%", {
+      options: "oldlook,star,atommovebutton"
+    });
+    const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
+    jsmeApplet.readGenericMolecularInput(defaultSmiles);
+    init3DViewer();
+    processMolecule(defaultSmiles, false);
+  }, 100);
 }
 
 // 2. 初始化深色背景的 3Dmol 視窗
