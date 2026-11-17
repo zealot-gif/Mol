@@ -1,27 +1,27 @@
-let jsmeApplet;
-let viewer3D;
+let viewer3D = null;
 let currentSdfData = "";
 
-// 1. JSME 初始化
-function jsmeOnLoad() {
-  setTimeout(() => {
-    jsmeApplet = new JSApplet.JSME("jsme_container", "100%", "100%", {
-      // noborder: 移除畫布內建邊框；noinfo: 隱藏笑臉與 i 按鈕
-      options: "newlook,star,atommovebutton,noborder,noinfo",
-      guicolor: "#1e293b"
-    });
-    const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
-    jsmeApplet.readGenericMolecularInput(defaultSmiles);
-    init3DViewer();
-    processMolecule(defaultSmiles, false);
-  }, 100);
-}
-// 2. 初始化深色背景的 3Dmol 視窗
+// 1. 頁面載入後立即啟動 3D 引擎並載入預設咖啡因模型（不等待外部繪圖器）
+window.addEventListener("DOMContentLoaded", () => {
+  init3DViewer();
+  const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
+  processMolecule(defaultSmiles, false);
+});
+
 function init3DViewer() {
   viewer3D = $3Dmol.createViewer("viewer_3d", { backgroundColor: "#0f172a" });
 }
 
-// 3. 核心雙引擎處理：優先查詢 PubChem，若無資料則自動切換為本地 3D 演算法
+// 2. 智慧判斷輸入是「英文名稱」還是「SMILES 結構式」
+function handleUserQuery(input) {
+  const trimmed = input.trim();
+  if (!trimmed) return;
+  // 若包含典型 SMILES 符號 (=, #, (, ), [, ], @) 且無空白，視為 SMILES；否則視為名稱
+  const looksLikeSmiles = /^[A-Za-z0-9@+\-\[\]\(\)\\\/%=#$]+$/.test(trimmed) && /[=\(\)\[\]#1-9]/.test(trimmed);
+  processMolecule(trimmed, !looksLikeSmiles);
+}
+
+// 3. 雙引擎核心：PubChem API 優先，無資料自動轉 OpenChemLib 本地 3D 計算
 async function processMolecule(query, isName = false) {
   const infoEl = document.getElementById("molInfo");
   const badgeEl = document.getElementById("sourceBadge");
@@ -33,7 +33,6 @@ async function processMolecule(query, isName = false) {
     const type = isName ? "name" : "smiles";
     const encoded = encodeURIComponent(query);
 
-    // 嘗試從 PubChem 取得 3D 結構
     const sdfRes = await fetch(
       `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${type}/${encoded}/SDF?record_type=3d`
     );
@@ -51,22 +50,16 @@ async function processMolecule(query, isName = false) {
       formulaEl.textContent = `${props.MolecularFormula} (${props.MolecularWeight} g/mol)`;
       infoEl.textContent = `IUPAC 命名：${props.IUPACName || "無資料"}`;
 
-      // 若是名稱搜尋，同步把 2D 結構畫回左側畫布
-      if (isName) {
-        jsmeApplet.readGenericMolecularInput(currentSdfData);
-      }
       render3DModel(currentSdfData);
       return;
     }
 
-    // 若 PubChem 查無 3D 結構且輸入為 SMILES，啟動本地 OpenChemLib 3D 計算
     if (!isName) {
       generateLocal3D(query);
     } else {
-      throw new Error("資料庫找不到此名稱，請嘗試輸入 SMILES 或直接在左側繪製");
+      throw new Error("資料庫找不到此名稱，請嘗試輸入 SMILES 字串");
     }
   } catch (err) {
-    // 網路失敗或查無資料時的本地備援
     if (!isName) {
       generateLocal3D(query);
     } else {
@@ -78,7 +71,7 @@ async function processMolecule(query, isName = false) {
   }
 }
 
-// 4. 本地 3D 座標計算引擎 (使用 OpenChemLib ConformerGenerator)
+// 4. 本地 3D 座標計算引擎 (OpenChemLib)
 function generateLocal3D(smiles) {
   const infoEl = document.getElementById("molInfo");
   const badgeEl = document.getElementById("sourceBadge");
@@ -88,14 +81,12 @@ function generateLocal3D(smiles) {
     const mol = OCL.Molecule.fromSmiles(smiles);
     mol.addImplicitHydrogens();
 
-    // 使用本地構象演算法生成 3D 空間座標
     const generator = new OCL.ConformerGenerator(1);
     const mol3D = generator.getOneConformerAsMolecule(mol);
     if (!mol3D) throw new Error("無法為此結構生成有效的 3D 空間座標");
 
     currentSdfData = mol3D.toMolfileV3();
 
-    // 本地計算分子式與精確分子量
     const formulaObj = mol.getMolecularFormula();
     badgeEl.className = "badge badge-local";
     badgeEl.textContent = "⚡ 本地 3D 演算引擎";
@@ -111,7 +102,6 @@ function generateLocal3D(smiles) {
   }
 }
 
-// 5. 渲染 3D 模型
 function render3DModel(molData) {
   viewer3D.clear();
   viewer3D.addModel(molData, "sdf");
@@ -132,19 +122,22 @@ function apply3DStyle(styleType) {
   viewer3D.render();
 }
 
-// 6. 事件綁定
-document.getElementById("syncBtn").addEventListener("click", () => {
-  const smiles = jsmeApplet.smiles();
-  if (smiles) processMolecule(smiles, false);
+// 5. 事件綁定
+document.getElementById("searchBtn").addEventListener("click", () => {
+  handleUserQuery(document.getElementById("searchInput").value);
 });
 
-document.getElementById("searchBtn").addEventListener("click", () => {
-  const val = document.getElementById("searchInput").value.trim();
-  if (val) processMolecule(val, true);
+document.getElementById("syncBtn").addEventListener("click", () => {
+  const val = document.getElementById("searchInput").value;
+  if (val.trim()) {
+    handleUserQuery(val);
+  } else {
+    alert("請先在 Ketcher 左上角點擊儲存圖示複製 SMILES，貼上至上方搜尋框後再轉換！");
+  }
 });
 
 document.getElementById("searchInput").addEventListener("keypress", (e) => {
-  if (e.key === "Enter") document.getElementById("searchBtn").click();
+  if (e.key === "Enter") handleUserQuery(e.target.value);
 });
 
 document.getElementById("styleSelect").addEventListener("change", (e) => {
@@ -154,7 +147,7 @@ document.getElementById("styleSelect").addEventListener("change", (e) => {
 document.querySelectorAll(".pill").forEach((btn) => {
   btn.addEventListener("click", () => {
     const smiles = btn.getAttribute("data-smiles");
-    jsmeApplet.readGenericMolecularInput(smiles);
+    document.getElementById("searchInput").value = smiles;
     processMolecule(smiles, false);
   });
 });
