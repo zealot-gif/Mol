@@ -3,67 +3,102 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MolView Studio - 2D/3D 分子實驗室</title>
+  <title>MolView</title>
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Kekule.js 樣式與核心腳本 -->
+  <!-- Kekule.js 核心引擎 -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/kekule@1.0.2/dist/themes/default/kekule.css" />
   <script src="https://cdn.jsdelivr.net/npm/kekule@1.0.2/dist/kekule.min.js"></script>
 
-  <!-- 3Dmol.js 渲染引擎 -->
+  <!-- 3Dmol.js 3D 渲染引擎 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js"></script>
-  <!-- OpenChemLib JS (本地 3D 構象計算) -->
+  <!-- OpenChemLib JS (本地 3D 構象演算) -->
   <script src="https://cdn.jsdelivr.net/npm/openchemlib@8.14.0/dist/openchemlib-full.js"></script>
 </head>
 <body>
-  <header class="toolbar">
-    <div class="brand-group">
-      <div class="brand">🧪 MolView Studio</div>
-      <div class="quick-pills">
-        <button class="pill pill-amber" data-smiles="CN1C=NC2=C1C(=O)N(C(=O)N2C)C">咖啡因</button>
-        <button class="pill pill-red" data-smiles="CC(=O)OC1=CC=CC=C1C(=O)O">阿斯匹靈</button>
-        <button class="pill pill-teal" data-smiles="C([C@@H]1[C@H]([C@@H]([C@H](C(O1)O)O)O)O)O">葡萄糖</button>
-        <button class="pill pill-blue" data-smiles="CC1(C(N2C(S1)C(C2=O)NC(=O)CC3=CC=CC=C3)C(=O)O)C">青黴素</button>
-      </div>
-    </div>
-
-    <div class="controls">
-      <div class="search-box">
-        <input type="text" id="searchInput" placeholder="搜尋分子名稱或 SMILES..." />
-        <button id="searchBtn" class="btn btn-secondary">搜尋</button>
-      </div>
-      <button id="syncBtn" class="btn btn-primary">⚡ 2D 轉 3D</button>
-      <select id="styleSelect" class="select-dark">
-        <option value="stick">球棍模型 (Ball & Stick)</option>
-        <option value="sphere">空間填充 (Space-filling)</option>
-        <option value="line">線框模型 (Wireframe)</option>
-      </select>
-      <button id="exportBtn" class="btn btn-outline">⬇ 匯出 .SDF</button>
-    </div>
-  </header>
-
-  <main class="workspace">
-    <!-- 左側：Kekule.js 現代 2D 化學結構繪圖器 -->
-    <section class="panel left-panel">
-      <div class="panel-header">
-        <span>2D 化學結構繪製區 (Kekule.js)</span>
-        <span class="hint">繪製後點擊上方「2D 轉 3D」自動生成</span>
-      </div>
-      <div id="kekule_composer"></div>
-    </section>
-
-    <!-- 右側：3D 視覺化與資訊卡片 -->
-    <section class="panel right-panel">
-      <div id="viewer_3d"></div>
-      <div id="info_card" class="info-card">
-        <div class="info-header">
-          <span id="sourceBadge" class="badge badge-cloud">待命</span>
-          <span id="molFormula" class="formula-tag">—</span>
+  <div class="app-container">
+    <!-- 左側（或全螢幕）：2D 繪圖畫布與原版懸浮工具島 -->
+    <div class="editor-pane" id="editorPane">
+      <!-- 頂部第一排：核心選單島 -->
+      <div class="floating-bar top-menu">
+        <div class="brand-logo" title="MolView">🧪</div>
+        <button class="menu-btn" id="exportBtn">☁ 保存 (.SDF)</button>
+        <button class="menu-btn active" id="toggle3DBtn">👁 2D / 3D 雙視窗</button>
+        <div class="search-wrap">
+          <span>🔍</span>
+          <input type="text" id="searchInput" placeholder="搜索分子 (如 caffeine)..." />
         </div>
-        <div id="molInfo" class="info-text">正在初始化實驗室環境...</div>
+        <button class="menu-btn primary-pill" id="syncBtn">⚡ 同步 3D</button>
       </div>
-    </section>
-  </main>
+
+      <!-- 頂部第二排：編輯動作島 -->
+      <div class="floating-bar sub-menu">
+        <button class="tool-icon" data-action="select" title="選取/移動">↖</button>
+        <button class="tool-icon" data-action="lasso" title="套索選取">⭯</button>
+        <button class="tool-icon" data-action="erase" title="橡皮擦">⌫</button>
+        <button class="tool-icon danger" data-action="clear" title="清空畫布">🗑</button>
+        <div class="divider"></div>
+        <button class="tool-icon" data-action="undo" title="復原">↶</button>
+        <button class="tool-icon" data-action="redo" title="重做">↷</button>
+        <div class="divider"></div>
+        <button class="tool-icon" data-action="center" title="置中">⌖</button>
+        <button class="tool-icon" data-action="zoomIn" title="放大">⊕</button>
+        <button class="tool-icon" data-action="zoomOut" title="縮小">⊖</button>
+      </div>
+
+      <!-- 左側直立工具島：鍵結、電荷與環狀模板 -->
+      <div class="floating-dock left-dock">
+        <button class="dock-btn active" data-bond="1" title="單鍵">／</button>
+        <button class="dock-btn" data-bond="2" title="雙鍵">＝</button>
+        <button class="dock-btn" data-bond="3" title="三鍵">≡</button>
+        <div class="h-divider"></div>
+        <button class="dock-btn" data-charge="1" title="正電荷">⊕</button>
+        <button class="dock-btn" data-charge="-1" title="負電荷">⊖</button>
+        <div class="h-divider"></div>
+        <button class="dock-btn" data-ring="benzene" title="苯環">⏣</button>
+        <button class="dock-btn" data-ring="cyclohexane" title="環己烷">⬡</button>
+        <button class="dock-btn" data-ring="cyclopentane" title="環戊烷">⬠</button>
+      </div>
+
+      <!-- 右側直立工具島：常見元素選擇器 -->
+      <div class="floating-dock right-dock">
+        <button class="atom-btn" data-atom="H">H</button>
+        <button class="atom-btn active" data-atom="C">C</button>
+        <button class="atom-btn" data-atom="N">N</button>
+        <button class="atom-btn" data-atom="O">O</button>
+        <button class="atom-btn" data-atom="P">P</button>
+        <button class="atom-btn" data-atom="S">S</button>
+        <div class="h-divider"></div>
+        <button class="atom-btn" data-atom="F">F</button>
+        <button class="atom-btn" data-atom="Cl">Cl</button>
+        <button class="atom-btn" data-atom="Br">Br</button>
+        <button class="atom-btn" data-atom="I">I</button>
+      </div>
+
+      <!-- 左下角縮放百分比標籤 -->
+      <div class="zoom-badge" id="zoomBadge">100%</div>
+
+      <!-- 底層純白化學畫布 -->
+      <div id="kekule_canvas"></div>
+    </div>
+
+    <!-- 右側：3D 分子視覺化視窗 -->
+    <div class="viewer-pane" id="viewerPane">
+      <div class="viewer-controls">
+        <select id="styleSelect">
+          <option value="stick">球棍模型 (Ball & Stick)</option>
+          <option value="sphere">空間填充 (Space-filling)</option>
+          <option value="line">線框模型 (Wireframe)</option>
+        </select>
+      </div>
+      <div id="viewer_3d"></div>
+      <div class="mol-status-card">
+        <span id="sourceBadge" class="badge cloud">☁ PubChem</span>
+        <strong id="molFormula">—</strong>
+        <span id="molInfo">載入中...</span>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
