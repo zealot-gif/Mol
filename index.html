@@ -6,58 +6,52 @@
   <title>MolView</title>
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Kekule.js 核心引擎 -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/kekule@1.0.2/dist/themes/default/kekule.css" />
-  <script src="https://cdn.jsdelivr.net/npm/kekule@1.0.2/dist/kekule.min.js"></script>
-
   <!-- 3Dmol.js 3D 渲染引擎 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js"></script>
-  <!-- OpenChemLib JS (本地 3D 構象演算) -->
+  <!-- OpenChemLib JS (SMILES 解析與本地 3D 構象演算) -->
   <script src="https://cdn.jsdelivr.net/npm/openchemlib@8.14.0/dist/openchemlib-full.js"></script>
 </head>
 <body>
   <div class="app-container">
-    <!-- 左側（或全螢幕）：2D 繪圖畫布與原版懸浮工具島 -->
+    <!-- 左側：原版 MolView 風格 2D 繪圖區 -->
     <div class="editor-pane" id="editorPane">
       <!-- 頂部第一排：核心選單島 -->
       <div class="floating-bar top-menu">
         <div class="brand-logo" title="MolView">🧪</div>
         <button class="menu-btn" id="exportBtn">☁ 保存 (.SDF)</button>
-        <button class="menu-btn active" id="toggle3DBtn">👁 2D / 3D 雙視窗</button>
+        <button class="menu-btn active" id="toggle3DBtn">👁 2D / 3D</button>
         <div class="search-wrap">
           <span>🔍</span>
-          <input type="text" id="searchInput" placeholder="搜索分子 (如 caffeine)..." />
+          <input type="text" id="searchInput" placeholder="搜索 (如 caffeine)..." />
         </div>
-        <button class="menu-btn primary-pill" id="syncBtn">⚡ 同步 3D</button>
+        <button class="menu-btn primary-pill" id="syncBtn">⚡ 轉 3D</button>
       </div>
 
       <!-- 頂部第二排：編輯動作島 -->
       <div class="floating-bar sub-menu">
-        <button class="tool-icon" data-action="select" title="選取/移動">↖</button>
-        <button class="tool-icon" data-action="lasso" title="套索選取">⭯</button>
-        <button class="tool-icon" data-action="erase" title="橡皮擦">⌫</button>
-        <button class="tool-icon danger" data-action="clear" title="清空畫布">🗑</button>
+        <button class="tool-icon" id="btnErase" title="橡皮擦 (點擊原子或鍵刪除)">⌫</button>
+        <button class="tool-icon danger" id="btnClear" title="清空畫布">🗑</button>
         <div class="divider"></div>
-        <button class="tool-icon" data-action="undo" title="復原">↶</button>
-        <button class="tool-icon" data-action="redo" title="重做">↷</button>
+        <button class="tool-icon" id="btnUndo" title="復原">↶</button>
+        <button class="tool-icon" id="btnRedo" title="重做">↷</button>
         <div class="divider"></div>
-        <button class="tool-icon" data-action="center" title="置中">⌖</button>
-        <button class="tool-icon" data-action="zoomIn" title="放大">⊕</button>
-        <button class="tool-icon" data-action="zoomOut" title="縮小">⊖</button>
+        <button class="tool-icon" id="btnCenter" title="置中">⌖</button>
+        <button class="tool-icon" id="btnZoomIn" title="放大">⊕</button>
+        <button class="tool-icon" id="btnZoomOut" title="縮小">⊖</button>
       </div>
 
       <!-- 左側直立工具島：鍵結、電荷與環狀模板 -->
       <div class="floating-dock left-dock">
-        <button class="dock-btn active" data-bond="1" title="單鍵">／</button>
-        <button class="dock-btn" data-bond="2" title="雙鍵">＝</button>
-        <button class="dock-btn" data-bond="3" title="三鍵">≡</button>
+        <button class="dock-btn active" data-tool="bond" data-order="1" title="單鍵">／</button>
+        <button class="dock-btn" data-tool="bond" data-order="2" title="雙鍵">＝</button>
+        <button class="dock-btn" data-tool="bond" data-order="3" title="三鍵">≡</button>
         <div class="h-divider"></div>
-        <button class="dock-btn" data-charge="1" title="正電荷">⊕</button>
-        <button class="dock-btn" data-charge="-1" title="負電荷">⊖</button>
+        <button class="dock-btn" data-tool="charge" data-val="1" title="正電荷 (+1)">⊕</button>
+        <button class="dock-btn" data-tool="charge" data-val="-1" title="負電荷 (-1)">⊖</button>
         <div class="h-divider"></div>
-        <button class="dock-btn" data-ring="benzene" title="苯環">⏣</button>
-        <button class="dock-btn" data-ring="cyclohexane" title="環己烷">⬡</button>
-        <button class="dock-btn" data-ring="cyclopentane" title="環戊烷">⬠</button>
+        <button class="dock-btn" data-tool="ring" data-ring="benzene" title="點擊畫布放置苯環">⏣</button>
+        <button class="dock-btn" data-tool="ring" data-ring="cyclohexane" title="點擊畫布放置環己烷">⬡</button>
+        <button class="dock-btn" data-tool="ring" data-ring="cyclopentane" title="點擊畫布放置環戊烷">⬠</button>
       </div>
 
       <!-- 右側直立工具島：常見元素選擇器 -->
@@ -78,8 +72,8 @@
       <!-- 左下角縮放百分比標籤 -->
       <div class="zoom-badge" id="zoomBadge">100%</div>
 
-      <!-- 底層純白化學畫布 -->
-      <div id="kekule_canvas"></div>
+      <!-- 原生高解析 HTML5 化學繪圖畫布 -->
+      <canvas id="molCanvas"></canvas>
     </div>
 
     <!-- 右側：3D 分子視覺化視窗 -->
@@ -95,7 +89,7 @@
       <div class="mol-status-card">
         <span id="sourceBadge" class="badge cloud">☁ PubChem</span>
         <strong id="molFormula">—</strong>
-        <span id="molInfo">載入中...</span>
+        <span id="molInfo">準備就緒</span>
       </div>
     </div>
   </div>
