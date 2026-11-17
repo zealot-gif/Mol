@@ -3,39 +3,61 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MolView Clone - 2D/3D 分子繪圖與檢視器</title>
+  <title>MolView Studio - 2D/3D 分子實驗室</title>
   <link rel="stylesheet" href="style.css" />
-  <!-- 載入 3Dmol.js 與 JSME -->
+  <!-- 3Dmol.js 渲染引擎 -->
   <script src="https://3Dmol.org/build/3Dmol-min.js"></script>
+  <!-- OpenChemLib JS (本地化學資訊學與 3D 構象計算) -->
+  <script src="https://www.lactame.com/lib/openchemlib/8.14.0/openchemlib-full.js"></script>
+  <!-- JSME 2D 化學繪圖器 -->
   <script src="https://jsme-editor.github.io/dist/jsme/jsme.nocache.js"></script>
 </head>
 <body>
   <header class="toolbar">
-    <div class="brand">🧪 MolView Lite</div>
+    <div class="brand-group">
+      <div class="brand">🧪 MolView Studio</div>
+      <div class="quick-pills">
+        <button class="pill pill-amber" data-smiles="CN1C=NC2=C1C(=O)N(C(=O)N2C)C">咖啡因</button>
+        <button class="pill pill-red" data-smiles="CC(=O)OC1=CC=CC=C1C(=O)O">阿斯匹靈</button>
+        <button class="pill pill-teal" data-smiles="C([C@@H]1[C@H]([C@@H]([C@H](C(O1)O)O)O)O)O">葡萄糖</button>
+        <button class="pill pill-blue" data-smiles="CC1(C(N2C(S1)C(C2=O)NC(=O)CC3=CC=CC=C3)C(=O)O)C">青黴素</button>
+      </div>
+    </div>
+
     <div class="controls">
-      <input type="text" id="searchInput" placeholder="輸入英文名稱或 SMILES (如: caffeine, aspirin)" />
-      <button id="searchBtn">搜尋分子</button>
-      <button id="syncBtn" class="primary">2D 轉 3D ➔</button>
-      <select id="styleSelect">
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="搜尋分子名稱或 SMILES..." />
+        <button id="searchBtn" class="btn btn-secondary">搜尋</button>
+      </div>
+      <button id="syncBtn" class="btn btn-primary">⚡ 2D 轉 3D</button>
+      <select id="styleSelect" class="select-dark">
         <option value="stick">球棍模型 (Ball & Stick)</option>
         <option value="sphere">空間填充 (Space-filling)</option>
         <option value="line">線框模型 (Wireframe)</option>
       </select>
-      <button id="exportBtn">下載 .SDF</button>
+      <button id="exportBtn" class="btn btn-outline">⬇ 匯出 .SDF</button>
     </div>
   </header>
 
   <main class="workspace">
-    <!-- 左側：2D 化學結構繪圖器 -->
+    <!-- 左側：2D 繪圖面板 -->
     <section class="panel left-panel">
+      <div class="panel-header">
+        <span>2D 化學結構繪製區</span>
+        <span class="hint">支援任意自創結構本地演算</span>
+      </div>
       <div id="jsme_container"></div>
     </section>
 
-    <!-- 右側：3D 分子渲染器與資訊面板 -->
+    <!-- 右側：3D 視覺化與資訊卡片 -->
     <section class="panel right-panel">
       <div id="viewer_3d"></div>
       <div id="info_card" class="info-card">
-        <strong>分子資訊：</strong> <span id="molInfo">請在左側繪製結構並點擊「2D 轉 3D」</span>
+        <div class="info-header">
+          <span id="sourceBadge" class="badge badge-cloud">待命</span>
+          <span id="molFormula" class="formula-tag">—</span>
+        </div>
+        <div id="molInfo" class="info-text">請在左側繪製結構並點擊「2D 轉 3D」</div>
       </div>
     </section>
   </main>
