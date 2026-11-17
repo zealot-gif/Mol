@@ -2,7 +2,7 @@
   --bg-deep: #0b1120;
   --bg-panel: #131c31;
   --bg-elevated: #1e293b;
-  --border-subtle: rgba(148, 163, 184, 0.2);
+  --border-subtle: transparent;
   --border-glow: rgba(56, 189, 248, 0.4);
   --text-main: #f1f5f9;
   --text-muted: #94a3b8;
@@ -121,4 +121,27 @@ html, body {
 /* JSME 結構中，前幾個 canvas 是工具列，最後一個最大的才是繪圖畫布 */
 #jsme_container div > canvas:not(:last-child) {
   filter: invert(0.88) hue-rotate(185deg) saturate(1.4) contrast(1.1) !important;
+}
+
+/* 將所有容器與按鈕的外框線設為透明 */
+.toolbar,
+.panel,
+.panel-header,
+.search-box,
+.btn,
+.select-dark,
+.info-card {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* 徹底移除 JSME 內部表格與畫布的邊框線條 */
+#jsme_container,
+#jsme_container table,
+#jsme_container td,
+#jsme_container div,
+#jsme_container canvas {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
