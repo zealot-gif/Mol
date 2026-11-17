@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MolView Clone - 2D/3D 分子繪圖與檢視器</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- 載入 3Dmol.js 與 JSME -->
+  <script src="https://3Dmol.org/build/3Dmol-min.js"></script>
+  <script src="https://jsme-editor.github.io/dist/jsme/jsme.nocache.js"></script>
+</head>
+<body>
+  <header class="toolbar">
+    <div class="brand">🧪 MolView Lite</div>
+    <div class="controls">
+      <input type="text" id="searchInput" placeholder="輸入英文名稱或 SMILES (如: caffeine, aspirin)" />
+      <button id="searchBtn">搜尋分子</button>
+      <button id="syncBtn" class="primary">2D 轉 3D ➔</button>
+      <select id="styleSelect">
+        <option value="stick">球棍模型 (Ball & Stick)</option>
+        <option value="sphere">空間填充 (Space-filling)</option>
+        <option value="line">線框模型 (Wireframe)</option>
+      </select>
+      <button id="exportBtn">下載 .SDF</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- 左側：2D 化學結構繪圖器 -->
+    <section class="panel left-panel">
+      <div id="jsme_container"></div>
+    </section>
+
+    <!-- 右側：3D 分子渲染器與資訊面板 -->
+    <section class="panel right-panel">
+      <div id="viewer_3d"></div>
+      <div id="info_card" class="info-card">
+        <strong>分子資訊：</strong> <span id="molInfo">請在左側繪製結構並點擊「2D 轉 3D」</span>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
