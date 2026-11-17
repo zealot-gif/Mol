@@ -1,24 +1,22 @@
-// === 分子資料結構 (Atoms & Bonds) ===
-let atoms = []; // { id, x, y, el, charge }
-let bonds = []; // { a1, a2, order }
+// === 分子資料結構 ===
+let atoms = [];
+let bonds = [];
 let history = [];
 let redoStack = [];
 
 // 當前工具狀態
-let currentMode = "bond"; // "bond" | "ring" | "charge" | "erase"
+let currentMode = "bond";
 let currentBondOrder = 1;
 let currentRingType = "benzene";
 let currentChargeVal = 1;
 let currentElement = "C";
 let zoom = 1.0;
 
-// 互動狀態
 let hoverAtom = null;
 let hoverBond = null;
 let dragStartAtom = null;
 let dragPos = null;
 
-// 3D 引擎狀態
 let viewer3D = null;
 let currentSdfData = "";
 
@@ -35,11 +33,16 @@ window.addEventListener("DOMContentLoaded", () => {
   init3DViewer();
   resizeCanvas();
   window.addEventListener("resize", resizeCanvas);
-
-  // 預設載入咖啡因分子結構
-  loadSmilesTo2D("CN1C=NC2=C1C(=O)N(C(=O)N2C)C");
-  processMolecule("CN1C=NC2=C1C(=O)N(C(=O)N2C)C", false);
   bindUIEvents();
+
+  // 先載入預設咖啡因 3D 模型（不依賴 2D 解析，保證 100% 顯示）
+  const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
+  processMolecule(defaultSmiles, false);
+
+  // 再繪製 2D 結構到畫布
+  setTimeout(() => {
+    loadSmilesTo2D(defaultSmiles);
+  }, 100);
 });
 
 function resizeCanvas() {
@@ -57,11 +60,12 @@ function saveState() {
   redoStack = [];
 }
 
-// 使用 OpenChemLib 解析 SMILES 生成整齊的 2D 座標
+// 修正後的 2D 座標生成（相容所有版本 OpenChemLib）
 function loadSmilesTo2D(smiles) {
   try {
+    if (typeof OCL === "undefined") return;
     const mol = OCL.Molecule.fromSmiles(smiles);
-    mol.ensureHelperArrays(OCL.Molecule.cHelperCoords);
+    mol.ensureHelperArrays(7); // 7 = cHelperNeighbours | cHelperRings | cHelperCoords
     const nAtoms = mol.getAllAtoms();
     const nBonds = mol.getAllBonds();
 
@@ -69,12 +73,12 @@ function loadSmilesTo2D(smiles) {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
     for (let i = 0; i < nAtoms; i++) {
-      const x = mol.getAtomX(i) * 34;
-      const y = mol.getAtomY(i) * 34;
+      const x = mol.getAtomX(i) * 32;
+      const y = mol.getAtomY(i) * 32;
       minX = Math.min(minX, x); maxX = Math.max(maxX, x);
       minY = Math.min(minY, y); maxY = Math.max(maxY, y);
       newAtoms.push({
-        id: i,
+        id: i + 1,
         x, y,
         el: mol.getAtomLabel(i) || "C",
         charge: mol.getAtomCharge(i) || 0
@@ -89,8 +93,8 @@ function loadSmilesTo2D(smiles) {
     const newBonds = [];
     for (let i = 0; i < nBonds; i++) {
       newBonds.push({
-        a1: mol.getBondAtom(0, i),
-        a2: mol.getBondAtom(1, i),
+        a1: mol.getBondAtom(0, i) + 1,
+        a2: mol.getBondAtom(1, i) + 1,
         order: mol.getBondOrder(i) || 1
       });
     }
@@ -100,15 +104,14 @@ function loadSmilesTo2D(smiles) {
     bonds = newBonds;
     draw();
   } catch (e) {
-    console.warn("2D 載入失敗:", e);
+    console.error("2D 解析錯誤:", e);
   }
 }
 
-// 將目前畫布上的 atoms 與 bonds 匯出成標準 MDL Molfile (V2000)
 function exportCanvasToMolfile() {
   if (atoms.length === 0) return "";
   let lines = [
-    "MolView Clone",
+    "MolView",
     "  Native2D",
     "",
     `${String(atoms.length).padStart(3)}${String(bonds.length).padStart(3)}  0  0  0  0  0  0  0  0999 V2000`
@@ -117,8 +120,8 @@ function exportCanvasToMolfile() {
   const idMap = new Map();
   atoms.forEach((a, idx) => {
     idMap.set(a.id, idx + 1);
-    const x = (a.x / 34).toFixed(4).padStart(10);
-    const y = (-a.y / 34).toFixed(4).padStart(10);
+    const x = (a.x / 32).toFixed(4).padStart(10);
+    const y = (-a.y / 32).toFixed(4).padStart(10);
     const z = "0.0000".padStart(10);
     const el = a.el.padEnd(3);
     const chg = a.charge === 1 ? "  3" : a.charge === -1 ? "  5" : "  0";
@@ -136,7 +139,6 @@ function exportCanvasToMolfile() {
   return lines.join("\n");
 }
 
-// === 原版 MolView 風格 2D 繪圖渲染 ===
 function draw() {
   const rect = canvas.parentElement.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
@@ -146,7 +148,6 @@ function draw() {
   ctx.scale(zoom, zoom);
   ctx.translate(-rect.width / 2, -rect.height / 2);
 
-  // 1. 繪製化學鍵
   bonds.forEach((b) => {
     const a1 = atoms.find((a) => a.id === b.a1);
     const a2 = atoms.find((a) => a.id === b.a2);
@@ -177,7 +178,6 @@ function draw() {
     }
   });
 
-  // 2. 繪製拖曳預覽線
   if (dragStartAtom && dragPos) {
     ctx.strokeStyle = "#38bdf8";
     ctx.lineWidth = 2;
@@ -186,7 +186,6 @@ function draw() {
     ctx.setLineDash([]);
   }
 
-  // 3. 繪製原子標籤與高亮圓圈
   atoms.forEach((a) => {
     const degree = bonds.filter((b) => b.a1 === a.id || b.a2 === a.id).length;
     const showLabel = a.el !== "C" || degree === 0 || a.charge !== 0;
@@ -223,7 +222,6 @@ function drawLine(x1, y1, x2, y2) {
   ctx.stroke();
 }
 
-// === 滑鼠互動繪製邏輯 ===
 function getMousePos(e) {
   const rect = canvas.getBoundingClientRect();
   const rawX = e.clientX - rect.left;
@@ -243,8 +241,7 @@ function findBondAt(pos) {
     const a1 = atoms.find((a) => a.id === b.a1);
     const a2 = atoms.find((a) => a.id === b.a2);
     if (!a1 || !a2) return false;
-    const dist = pointToSegDist(pos.x, pos.y, a1.x, a1.y, a2.x, a2.y);
-    return dist < 8;
+    return pointToSegDist(pos.x, pos.y, a1.x, a1.y, a2.x, a2.y) < 8;
   }) || null;
 }
 
@@ -261,11 +258,10 @@ canvas.addEventListener("mousemove", (e) => {
   hoverAtom = findAtomAt(pos);
   hoverBond = hoverAtom ? null : findBondAt(pos);
   if (dragStartAtom) {
-    // 自動吸附 30 度角
     const dx = pos.x - dragStartAtom.x;
     const dy = pos.y - dragStartAtom.y;
     const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 6)) * (Math.PI / 6);
-    const dist = Math.hypot(dx, dy) < 20 ? 38 : Math.hypot(dx, dy);
+    const dist = Math.hypot(dx, dy) < 20 ? 36 : Math.hypot(dx, dy);
     dragPos = {
       x: dragStartAtom.x + Math.cos(angle) * dist,
       y: dragStartAtom.y + Math.sin(angle) * dist
@@ -348,12 +344,9 @@ canvas.addEventListener("mouseup", (e) => {
     const newId = Date.now() + Math.random();
     atoms.push({ id: newId, x: pos.x, y: pos.y, el: currentElement, charge: 0 });
     bonds.push({ a1: dragStartAtom.id, a2: newId, order: currentBondOrder });
-  } else {
-    // 單純點擊現有原子 -> 切換為當前選中的元素
-    if (dragStartAtom.el !== currentElement) {
-      saveState();
-      dragStartAtom.el = currentElement;
-    }
+  } else if (dragStartAtom.el !== currentElement) {
+    saveState();
+    dragStartAtom.el = currentElement;
   }
 
   dragStartAtom = null;
@@ -363,7 +356,7 @@ canvas.addEventListener("mouseup", (e) => {
 
 function addRingAt(center, type, attachAtom) {
   const sides = type === "cyclopentane" ? 5 : 6;
-  const radius = 38;
+  const radius = 36;
   const ringAtoms = [];
 
   for (let i = 0; i < sides; i++) {
@@ -387,7 +380,6 @@ function addRingAt(center, type, attachAtom) {
   }
 }
 
-// === 綁定懸浮工具島事件 ===
 function bindUIEvents() {
   document.querySelectorAll(".dock-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -510,7 +502,6 @@ function bindUIEvents() {
   });
 }
 
-// === 3D 渲染與雙引擎計算 ===
 function init3DViewer() {
   viewer3D = $3Dmol.createViewer("viewer_3d", { backgroundColor: "#0f172a" });
 }
