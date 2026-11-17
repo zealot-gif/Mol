@@ -1,34 +1,34 @@
 let composer = null;
 let viewer3D = null;
 let currentSdfData = "";
+let zoomPercent = 100;
 
-// 1. 初始化 Kekule 編輯器與 3D 視窗
 window.addEventListener("DOMContentLoaded", () => {
   init3DViewer();
 
-  const container = document.getElementById("kekule_composer");
+  const container = document.getElementById("kekule_canvas");
   composer = new Kekule.Editor.Composer(container);
-  composer.setCommonToolButtons(["newDoc", "undo", "redo", "copy", "cut", "paste", "zoomIn", "zoomOut"]);
+  // 隱藏原生工具列，完全由我們自訂的懸浮島控制
+  composer.setEnableToolbar(false);
 
-  // 強制 Kekule 配合外層容器計算正確的畫布與工具列尺寸
-  const resizeKekule = () => {
+  const resizeCanvas = () => {
     if (composer && container) {
       composer.setDimension(container.clientWidth + "px", container.clientHeight + "px");
     }
   };
 
   setTimeout(() => {
-    resizeKekule();
-    const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
-    loadSmilesToKekule(defaultSmiles);
+    resizeCanvas();
+    const defaultSmiles = "COC(=O)C1CCC2CCCCC2C1=O"; // 與你截圖結構相近的雙環酯類
+    loadSmilesToCanvas(defaultSmiles);
     processMolecule(defaultSmiles, false);
   }, 150);
 
-  window.addEventListener("resize", resizeKekule);
+  window.addEventListener("resize", resizeCanvas);
+  bindFloatingTools();
 });
 
-// 將 SMILES 載入 Kekule 畫布（透過 OpenChemLib 轉為標準 MOL 檔，確保 2D 座標整齊美觀）
-function loadSmilesToKekule(smiles) {
+function loadSmilesToCanvas(smiles) {
   if (!composer) return;
   try {
     const mol = OCL.Molecule.fromSmiles(smiles);
@@ -36,12 +36,81 @@ function loadSmilesToKekule(smiles) {
     const kekuleMol = Kekule.IO.loadFormatData(molfile, "mol");
     composer.setChemObj(kekuleMol);
   } catch (e) {
-    console.warn("2D 結構載入異常:", e);
+    console.warn("載入 2D 結構異常:", e);
   }
 }
 
 function init3DViewer() {
   viewer3D = $3Dmol.createViewer("viewer_3d", { backgroundColor: "#0f172a" });
+}
+
+// 綁定原版 MolView 風格懸浮工具列
+function bindFloatingTools() {
+  // 頂部第二排：編輯動作
+  document.querySelectorAll(".tool-icon").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const act = btn.getAttribute("data-action");
+      if (!composer) return;
+      if (act === "undo") composer.undo();
+      if (act === "redo") composer.redo();
+      if (act === "clear") composer.newDoc();
+      if (act === "erase") composer.setActiveIaControllerId("MolEraser");
+      if (act === "select" || act === "lasso") composer.setActiveIaControllerId("MolSelect");
+      if (act === "center") composer.scrollToObject(composer.getChemObj());
+      if (act === "zoomIn") {
+        composer.zoomIn();
+        zoomPercent += 10;
+        document.getElementById("zoomBadge").textContent = `${zoomPercent}%`;
+      }
+      if (act === "zoomOut") {
+        composer.zoomOut();
+        zoomPercent = Math.max(30, zoomPercent - 10);
+        document.getElementById("zoomBadge").textContent = `${zoomPercent}%`;
+      }
+    });
+  });
+
+  // 左側工具島：鍵結、電荷與環狀模板
+  document.querySelectorAll(".dock-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".dock-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      if (!composer) return;
+
+      const bond = btn.getAttribute("data-bond");
+      const charge = btn.getAttribute("data-charge");
+      const ring = btn.getAttribute("data-ring");
+
+      if (bond) {
+        composer.setActiveIaControllerId("MolBond");
+      } else if (charge) {
+        composer.setActiveIaControllerId("MolCharge");
+      } else if (ring) {
+        composer.setActiveIaControllerId("MolRing");
+      }
+    });
+  });
+
+  // 右側工具島：元素快選
+  document.querySelectorAll(".atom-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".atom-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      if (!composer) return;
+      composer.setActiveIaControllerId("MolAtom");
+    });
+  });
+
+  // 切換單純 2D / 雙視窗模式
+  document.getElementById("toggle3DBtn").addEventListener("click", (e) => {
+    const viewerPane = document.getElementById("viewerPane");
+    viewerPane.classList.toggle("hidden");
+    e.target.classList.toggle("active");
+    setTimeout(() => {
+      const container = document.getElementById("kekule_canvas");
+      composer.setDimension(container.clientWidth + "px", container.clientHeight + "px");
+    }, 50);
+  });
 }
 
 function handleUserQuery(input) {
@@ -56,7 +125,7 @@ async function processMolecule(query, isName = false) {
   const badgeEl = document.getElementById("sourceBadge");
   const formulaEl = document.getElementById("molFormula");
 
-  infoEl.textContent = "正在解析結構與生成 3D 空間座標...";
+  infoEl.textContent = "解析 3D 結構中...";
 
   try {
     const type = isName ? "name" : "smiles";
@@ -74,10 +143,10 @@ async function processMolecule(query, isName = false) {
       const propData = await propRes.json();
       const props = propData.PropertyTable.Properties[0];
 
-      badgeEl.className = "badge badge-cloud";
-      badgeEl.textContent = "☁ PubChem 資料庫";
-      formulaEl.textContent = `${props.MolecularFormula} (${props.MolecularWeight} g/mol)`;
-      infoEl.textContent = `IUPAC 命名：${props.IUPACName || "無資料"}`;
+      badgeEl.className = "badge cloud";
+      badgeEl.textContent = "☁ PubChem";
+      formulaEl.textContent = `${props.MolecularFormula} (${props.MolecularWeight})`;
+      infoEl.textContent = props.IUPACName || "";
 
       if (isName && composer) {
         const kekuleMol = Kekule.IO.loadFormatData(currentSdfData, "sdf");
@@ -90,13 +159,13 @@ async function processMolecule(query, isName = false) {
     if (!isName) {
       generateLocal3D(query);
     } else {
-      throw new Error("資料庫找不到此名稱，請嘗試輸入 SMILES 或直接在左側繪製");
+      throw new Error("查無此化合物名稱");
     }
   } catch (err) {
     if (!isName) {
       generateLocal3D(query);
     } else {
-      badgeEl.className = "badge badge-local";
+      badgeEl.className = "badge local";
       badgeEl.textContent = "提示";
       formulaEl.textContent = "—";
       infoEl.textContent = err.message;
@@ -115,22 +184,22 @@ function generateLocal3D(smiles) {
 
     const generator = new OCL.ConformerGenerator(1);
     const mol3D = generator.getOneConformerAsMolecule(mol);
-    if (!mol3D) throw new Error("無法為此結構生成有效的 3D 空間座標");
+    if (!mol3D) throw new Error("無法生成 3D 座標");
 
     currentSdfData = mol3D.toMolfileV3();
-
     const formulaObj = mol.getMolecularFormula();
-    badgeEl.className = "badge badge-local";
-    badgeEl.textContent = "⚡ 本地 3D 演算引擎";
-    formulaEl.textContent = `${formulaObj.formula} (${formulaObj.relativeWeight.toFixed(2)} g/mol)`;
-    infoEl.textContent = `自創／未收錄結構已於瀏覽器本地完成 3D 構象優化 ｜ SMILES: ${smiles}`;
+
+    badgeEl.className = "badge local";
+    badgeEl.textContent = "⚡ 本地演算";
+    formulaEl.textContent = `${formulaObj.formula} (${formulaObj.relativeWeight.toFixed(2)})`;
+    infoEl.textContent = `SMILES: ${smiles}`;
 
     render3DModel(currentSdfData);
   } catch (localErr) {
-    badgeEl.className = "badge badge-local";
-    badgeEl.textContent = "格式錯誤";
+    badgeEl.className = "badge local";
+    badgeEl.textContent = "錯誤";
     formulaEl.textContent = "—";
-    infoEl.textContent = `結構解析失敗：${localErr.message}`;
+    infoEl.textContent = localErr.message;
   }
 }
 
@@ -154,7 +223,6 @@ function apply3DStyle(styleType) {
   viewer3D.render();
 }
 
-// 從 Kekule 畫布匯出 MOL 並轉為標準 SMILES 再計算 3D
 document.getElementById("syncBtn").addEventListener("click", () => {
   if (!composer) return;
   const chemObj = composer.getChemObj();
@@ -177,14 +245,6 @@ document.getElementById("searchInput").addEventListener("keypress", (e) => {
 
 document.getElementById("styleSelect").addEventListener("change", (e) => {
   apply3DStyle(e.target.value);
-});
-
-document.querySelectorAll(".pill").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const smiles = btn.getAttribute("data-smiles");
-    loadSmilesToKekule(smiles);
-    processMolecule(smiles, false);
-  });
 });
 
 document.getElementById("exportBtn").addEventListener("click", () => {
