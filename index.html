@@ -3,13 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MolView Studio - 2D/3D 分子實驗室 (Ketcher 版)</title>
+  <title>MolView Studio - 2D/3D 分子實驗室</title>
   <link rel="stylesheet" href="style.css" />
 
   <!-- 3Dmol.js 渲染引擎 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js"></script>
   <!-- OpenChemLib JS (本地 3D 構象計算) -->
   <script src="https://cdn.jsdelivr.net/npm/openchemlib@8.14.0/dist/openchemlib-full.js"></script>
+  <!-- JSME 2D 化學繪圖器 (純 JS 本地運行，免 Iframe 限制) -->
+  <script src="https://jsme-editor.github.io/dist/jsme/jsme.nocache.js"></script>
 </head>
 <body>
   <header class="toolbar">
@@ -39,17 +41,13 @@
   </header>
 
   <main class="workspace">
-    <!-- 左側：Ketcher 2D 化學結構繪圖器 (Iframe 獨立沙盒模式) -->
+    <!-- 左側：2D 化學結構繪圖器 -->
     <section class="panel left-panel">
       <div class="panel-header">
-        <span>2D 化學結構繪製區 (Ketcher)</span>
-        <span class="hint">支援任意自創結構本地演算</span>
+        <span>2D 化學結構繪製區</span>
+        <span class="hint">繪製後點擊上方「2D 轉 3D」自動生成</span>
       </div>
-      <iframe
-        id="ketcher-frame"
-        src="https://lifescience.opensource.epam.com/KetcherDemo/index.html"
-        title="Ketcher 2D Editor"
-      ></iframe>
+      <div id="jsme_container"></div>
     </section>
 
     <!-- 右側：3D 視覺化與資訊卡片 -->
@@ -60,7 +58,7 @@
           <span id="sourceBadge" class="badge badge-cloud">待命</span>
           <span id="molFormula" class="formula-tag">—</span>
         </div>
-        <div id="molInfo" class="info-text">正在載入 3D 結構...</div>
+        <div id="molInfo" class="info-text">正在初始化實驗室環境...</div>
       </div>
     </section>
   </main>
