@@ -8,12 +8,23 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const container = document.getElementById("kekule_composer");
   composer = new Kekule.Editor.Composer(container);
-  // 精簡工具列，隱藏多餘檔案按鈕，保留完整繪圖與官能基工具
   composer.setCommonToolButtons(["newDoc", "undo", "redo", "copy", "cut", "paste", "zoomIn", "zoomOut"]);
 
-  const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
-  loadSmilesToKekule(defaultSmiles);
-  processMolecule(defaultSmiles, false);
+  // 強制 Kekule 配合外層容器計算正確的畫布與工具列尺寸
+  const resizeKekule = () => {
+    if (composer && container) {
+      composer.setDimension(container.clientWidth + "px", container.clientHeight + "px");
+    }
+  };
+
+  setTimeout(() => {
+    resizeKekule();
+    const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
+    loadSmilesToKekule(defaultSmiles);
+    processMolecule(defaultSmiles, false);
+  }, 150);
+
+  window.addEventListener("resize", resizeKekule);
 });
 
 // 將 SMILES 載入 Kekule 畫布（透過 OpenChemLib 轉為標準 MOL 檔，確保 2D 座標整齊美觀）
