@@ -1,23 +1,32 @@
-let jsmeApplet = null;
+let composer = null;
 let viewer3D = null;
 let currentSdfData = "";
 
-// 1. 頁面載入後先啟動 3D 引擎
+// 1. 初始化 Kekule 編輯器與 3D 視窗
 window.addEventListener("DOMContentLoaded", () => {
   init3DViewer();
+
+  const container = document.getElementById("kekule_composer");
+  composer = new Kekule.Editor.Composer(container);
+  // 精簡工具列，隱藏多餘檔案按鈕，保留完整繪圖與官能基工具
+  composer.setCommonToolButtons(["newDoc", "undo", "redo", "copy", "cut", "paste", "zoomIn", "zoomOut"]);
+
   const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
+  loadSmilesToKekule(defaultSmiles);
   processMolecule(defaultSmiles, false);
 });
 
-// 2. JSME 載入完成後初始化（加入 noborder, noinfo 隱藏框線與黃色笑臉）
-function jsmeOnLoad() {
-  setTimeout(() => {
-    jsmeApplet = new JSApplet.JSME("jsme_container", "100%", "100%", {
-      options: "newlook,star,atommovebutton,noborder,noinfo",
-      guicolor: "#1e293b"
-    });
-    jsmeApplet.readGenericMolecularInput("CN1C=NC2=C1C(=O)N(C(=O)N2C)C");
-  }, 100);
+// 將 SMILES 載入 Kekule 畫布（透過 OpenChemLib 轉為標準 MOL 檔，確保 2D 座標整齊美觀）
+function loadSmilesToKekule(smiles) {
+  if (!composer) return;
+  try {
+    const mol = OCL.Molecule.fromSmiles(smiles);
+    const molfile = mol.toMolfile();
+    const kekuleMol = Kekule.IO.loadFormatData(molfile, "mol");
+    composer.setChemObj(kekuleMol);
+  } catch (e) {
+    console.warn("2D 結構載入異常:", e);
+  }
 }
 
 function init3DViewer() {
@@ -59,8 +68,9 @@ async function processMolecule(query, isName = false) {
       formulaEl.textContent = `${props.MolecularFormula} (${props.MolecularWeight} g/mol)`;
       infoEl.textContent = `IUPAC 命名：${props.IUPACName || "無資料"}`;
 
-      if (isName && jsmeApplet) {
-        jsmeApplet.readGenericMolecularInput(currentSdfData);
+      if (isName && composer) {
+        const kekuleMol = Kekule.IO.loadFormatData(currentSdfData, "sdf");
+        composer.setChemObj(kekuleMol);
       }
       render3DModel(currentSdfData);
       return;
@@ -133,10 +143,14 @@ function apply3DStyle(styleType) {
   viewer3D.render();
 }
 
-// 一鍵從左側畫布讀取結構並轉成 3D
+// 從 Kekule 畫布匯出 MOL 並轉為標準 SMILES 再計算 3D
 document.getElementById("syncBtn").addEventListener("click", () => {
-  if (!jsmeApplet) return;
-  const smiles = jsmeApplet.smiles();
+  if (!composer) return;
+  const chemObj = composer.getChemObj();
+  if (!chemObj) return;
+  const molData = Kekule.IO.saveFormatData(chemObj, "mol");
+  const oclMol = OCL.Molecule.fromMolfile(molData);
+  const smiles = oclMol.toSmiles();
   if (smiles && smiles.trim() !== "") {
     processMolecule(smiles.trim(), false);
   }
@@ -157,7 +171,7 @@ document.getElementById("styleSelect").addEventListener("change", (e) => {
 document.querySelectorAll(".pill").forEach((btn) => {
   btn.addEventListener("click", () => {
     const smiles = btn.getAttribute("data-smiles");
-    if (jsmeApplet) jsmeApplet.readGenericMolecularInput(smiles);
+    loadSmilesToKekule(smiles);
     processMolecule(smiles, false);
   });
 });
