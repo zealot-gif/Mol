@@ -1,123 +1,518 @@
-let composer = null;
+// === 分子資料結構 (Atoms & Bonds) ===
+let atoms = []; // { id, x, y, el, charge }
+let bonds = []; // { a1, a2, order }
+let history = [];
+let redoStack = [];
+
+// 當前工具狀態
+let currentMode = "bond"; // "bond" | "ring" | "charge" | "erase"
+let currentBondOrder = 1;
+let currentRingType = "benzene";
+let currentChargeVal = 1;
+let currentElement = "C";
+let zoom = 1.0;
+
+// 互動狀態
+let hoverAtom = null;
+let hoverBond = null;
+let dragStartAtom = null;
+let dragPos = null;
+
+// 3D 引擎狀態
 let viewer3D = null;
 let currentSdfData = "";
-let zoomPercent = 100;
+
+const ATOM_COLORS = {
+  C: "#1e293b", H: "#475569", N: "#2563eb", O: "#dc2626",
+  S: "#d97706", P: "#ea580c", F: "#16a34a", Cl: "#16a34a",
+  Br: "#991b1b", I: "#7e22ce"
+};
+
+const canvas = document.getElementById("molCanvas");
+const ctx = canvas.getContext("2d");
 
 window.addEventListener("DOMContentLoaded", () => {
   init3DViewer();
-
-  const container = document.getElementById("kekule_canvas");
-  composer = new Kekule.Editor.Composer(container);
-  // 隱藏原生工具列，完全由我們自訂的懸浮島控制
-  composer.setEnableToolbar(false);
-
-  const resizeCanvas = () => {
-    if (composer && container) {
-      composer.setDimension(container.clientWidth + "px", container.clientHeight + "px");
-    }
-  };
-
-  setTimeout(() => {
-    resizeCanvas();
-    const defaultSmiles = "COC(=O)C1CCC2CCCCC2C1=O"; // 與你截圖結構相近的雙環酯類
-    loadSmilesToCanvas(defaultSmiles);
-    processMolecule(defaultSmiles, false);
-  }, 150);
-
+  resizeCanvas();
   window.addEventListener("resize", resizeCanvas);
-  bindFloatingTools();
+
+  // 預設載入咖啡因分子結構
+  loadSmilesTo2D("CN1C=NC2=C1C(=O)N(C(=O)N2C)C");
+  processMolecule("CN1C=NC2=C1C(=O)N(C(=O)N2C)C", false);
+  bindUIEvents();
 });
 
-function loadSmilesToCanvas(smiles) {
-  if (!composer) return;
+function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+
+function saveState() {
+  history.push(JSON.stringify({ atoms, bonds }));
+  if (history.length > 30) history.shift();
+  redoStack = [];
+}
+
+// 使用 OpenChemLib 解析 SMILES 生成整齊的 2D 座標
+function loadSmilesTo2D(smiles) {
   try {
     const mol = OCL.Molecule.fromSmiles(smiles);
-    const molfile = mol.toMolfile();
-    const kekuleMol = Kekule.IO.loadFormatData(molfile, "mol");
-    composer.setChemObj(kekuleMol);
+    mol.ensureHelperArrays(OCL.Molecule.cHelperCoords);
+    const nAtoms = mol.getAllAtoms();
+    const nBonds = mol.getAllBonds();
+
+    const newAtoms = [];
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
+    for (let i = 0; i < nAtoms; i++) {
+      const x = mol.getAtomX(i) * 34;
+      const y = mol.getAtomY(i) * 34;
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      newAtoms.push({
+        id: i,
+        x, y,
+        el: mol.getAtomLabel(i) || "C",
+        charge: mol.getAtomCharge(i) || 0
+      });
+    }
+
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const offsetX = rect.width / 2 - (minX + maxX) / 2;
+    const offsetY = rect.height / 2 - (minY + maxY) / 2;
+    newAtoms.forEach((a) => { a.x += offsetX; a.y += offsetY; });
+
+    const newBonds = [];
+    for (let i = 0; i < nBonds; i++) {
+      newBonds.push({
+        a1: mol.getBondAtom(0, i),
+        a2: mol.getBondAtom(1, i),
+        order: mol.getBondOrder(i) || 1
+      });
+    }
+
+    saveState();
+    atoms = newAtoms;
+    bonds = newBonds;
+    draw();
   } catch (e) {
-    console.warn("載入 2D 結構異常:", e);
+    console.warn("2D 載入失敗:", e);
   }
 }
 
-function init3DViewer() {
-  viewer3D = $3Dmol.createViewer("viewer_3d", { backgroundColor: "#0f172a" });
-}
+// 將目前畫布上的 atoms 與 bonds 匯出成標準 MDL Molfile (V2000)
+function exportCanvasToMolfile() {
+  if (atoms.length === 0) return "";
+  let lines = [
+    "MolView Clone",
+    "  Native2D",
+    "",
+    `${String(atoms.length).padStart(3)}${String(bonds.length).padStart(3)}  0  0  0  0  0  0  0  0999 V2000`
+  ];
 
-// 綁定原版 MolView 風格懸浮工具列
-function bindFloatingTools() {
-  // 頂部第二排：編輯動作
-  document.querySelectorAll(".tool-icon").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const act = btn.getAttribute("data-action");
-      if (!composer) return;
-      if (act === "undo") composer.undo();
-      if (act === "redo") composer.redo();
-      if (act === "clear") composer.newDoc();
-      if (act === "erase") composer.setActiveIaControllerId("MolEraser");
-      if (act === "select" || act === "lasso") composer.setActiveIaControllerId("MolSelect");
-      if (act === "center") composer.scrollToObject(composer.getChemObj());
-      if (act === "zoomIn") {
-        composer.zoomIn();
-        zoomPercent += 10;
-        document.getElementById("zoomBadge").textContent = `${zoomPercent}%`;
-      }
-      if (act === "zoomOut") {
-        composer.zoomOut();
-        zoomPercent = Math.max(30, zoomPercent - 10);
-        document.getElementById("zoomBadge").textContent = `${zoomPercent}%`;
-      }
-    });
+  const idMap = new Map();
+  atoms.forEach((a, idx) => {
+    idMap.set(a.id, idx + 1);
+    const x = (a.x / 34).toFixed(4).padStart(10);
+    const y = (-a.y / 34).toFixed(4).padStart(10);
+    const z = "0.0000".padStart(10);
+    const el = a.el.padEnd(3);
+    const chg = a.charge === 1 ? "  3" : a.charge === -1 ? "  5" : "  0";
+    lines.push(`${x}${y}${z} ${el} 0${chg}  0  0  0  0  0  0  0  0  0  0`);
   });
 
-  // 左側工具島：鍵結、電荷與環狀模板
+  bonds.forEach((b) => {
+    const i1 = String(idMap.get(b.a1)).padStart(3);
+    const i2 = String(idMap.get(b.a2)).padStart(3);
+    const ord = String(b.order).padStart(3);
+    lines.push(`${i1}${i2}${ord}  0  0  0  0`);
+  });
+
+  lines.push("M  END");
+  return lines.join("\n");
+}
+
+// === 原版 MolView 風格 2D 繪圖渲染 ===
+function draw() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  ctx.save();
+  ctx.translate(rect.width / 2, rect.height / 2);
+  ctx.scale(zoom, zoom);
+  ctx.translate(-rect.width / 2, -rect.height / 2);
+
+  // 1. 繪製化學鍵
+  bonds.forEach((b) => {
+    const a1 = atoms.find((a) => a.id === b.a1);
+    const a2 = atoms.find((a) => a.id === b.a2);
+    if (!a1 || !a2) return;
+
+    const isHover = hoverBond === b;
+    ctx.strokeStyle = isHover ? "#0284c7" : "#1e293b";
+    ctx.lineWidth = isHover ? 3 : 2;
+    ctx.lineCap = "round";
+
+    const dx = a2.x - a1.x;
+    const dy = a2.y - a1.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+
+    if (b.order === 1) {
+      drawLine(a1.x, a1.y, a2.x, a2.y);
+    } else if (b.order === 2) {
+      const off = 3.2;
+      drawLine(a1.x + nx * off, a1.y + ny * off, a2.x + nx * off, a2.y + ny * off);
+      drawLine(a1.x - nx * off, a1.y - ny * off, a2.x - nx * off, a2.y - ny * off);
+    } else if (b.order === 3) {
+      const off = 4.5;
+      drawLine(a1.x, a1.y, a2.x, a2.y);
+      drawLine(a1.x + nx * off, a1.y + ny * off, a2.x + nx * off, a2.y + ny * off);
+      drawLine(a1.x - nx * off, a1.y - ny * off, a2.x - nx * off, a2.y - ny * off);
+    }
+  });
+
+  // 2. 繪製拖曳預覽線
+  if (dragStartAtom && dragPos) {
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    drawLine(dragStartAtom.x, dragStartAtom.y, dragPos.x, dragPos.y);
+    ctx.setLineDash([]);
+  }
+
+  // 3. 繪製原子標籤與高亮圓圈
+  atoms.forEach((a) => {
+    const degree = bonds.filter((b) => b.a1 === a.id || b.a2 === a.id).length;
+    const showLabel = a.el !== "C" || degree === 0 || a.charge !== 0;
+
+    if (hoverAtom === a) {
+      ctx.fillStyle = "rgba(186, 230, 253, 0.75)";
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, 13, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (showLabel) {
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = ATOM_COLORS[a.el] || "#1e293b";
+      ctx.font = "bold 14px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const chargeStr = a.charge === 1 ? "+" : a.charge === -1 ? "−" : "";
+      ctx.fillText(a.el + chargeStr, a.x, a.y);
+    }
+  });
+
+  ctx.restore();
+}
+
+function drawLine(x1, y1, x2, y2) {
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+}
+
+// === 滑鼠互動繪製邏輯 ===
+function getMousePos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const rawX = e.clientX - rect.left;
+  const rawY = e.clientY - rect.top;
+  return {
+    x: (rawX - rect.width / 2) / zoom + rect.width / 2,
+    y: (rawY - rect.height / 2) / zoom + rect.height / 2
+  };
+}
+
+function findAtomAt(pos) {
+  return atoms.find((a) => Math.hypot(a.x - pos.x, a.y - pos.y) < 15) || null;
+}
+
+function findBondAt(pos) {
+  return bonds.find((b) => {
+    const a1 = atoms.find((a) => a.id === b.a1);
+    const a2 = atoms.find((a) => a.id === b.a2);
+    if (!a1 || !a2) return false;
+    const dist = pointToSegDist(pos.x, pos.y, a1.x, a1.y, a2.x, a2.y);
+    return dist < 8;
+  }) || null;
+}
+
+function pointToSegDist(px, py, x1, y1, x2, y2) {
+  const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+  if (l2 === 0) return Math.hypot(px - x1, py - y1);
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+}
+
+canvas.addEventListener("mousemove", (e) => {
+  const pos = getMousePos(e);
+  hoverAtom = findAtomAt(pos);
+  hoverBond = hoverAtom ? null : findBondAt(pos);
+  if (dragStartAtom) {
+    // 自動吸附 30 度角
+    const dx = pos.x - dragStartAtom.x;
+    const dy = pos.y - dragStartAtom.y;
+    const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 6)) * (Math.PI / 6);
+    const dist = Math.hypot(dx, dy) < 20 ? 38 : Math.hypot(dx, dy);
+    dragPos = {
+      x: dragStartAtom.x + Math.cos(angle) * dist,
+      y: dragStartAtom.y + Math.sin(angle) * dist
+    };
+  }
+  draw();
+});
+
+canvas.addEventListener("mousedown", (e) => {
+  const pos = getMousePos(e);
+  const hitAtom = findAtomAt(pos);
+  const hitBond = hitAtom ? null : findBondAt(pos);
+
+  if (currentMode === "erase") {
+    if (hitAtom) {
+      saveState();
+      atoms = atoms.filter((a) => a.id !== hitAtom.id);
+      bonds = bonds.filter((b) => b.a1 !== hitAtom.id && b.a2 !== hitAtom.id);
+    } else if (hitBond) {
+      saveState();
+      bonds = bonds.filter((b) => b !== hitBond);
+    }
+    draw();
+    return;
+  }
+
+  if (currentMode === "charge" && hitAtom) {
+    saveState();
+    hitAtom.charge = hitAtom.charge === currentChargeVal ? 0 : currentChargeVal;
+    draw();
+    return;
+  }
+
+  if (currentMode === "ring") {
+    saveState();
+    addRingAt(hitAtom ? { x: hitAtom.x, y: hitAtom.y } : pos, currentRingType, hitAtom);
+    draw();
+    return;
+  }
+
+  if (currentMode === "bond") {
+    if (hitBond) {
+      saveState();
+      hitBond.order = hitBond.order >= 3 ? 1 : hitBond.order + 1;
+      draw();
+      return;
+    }
+    if (hitAtom) {
+      dragStartAtom = hitAtom;
+      dragPos = pos;
+    } else {
+      saveState();
+      const newId = Date.now() + Math.random();
+      const newAtom = { id: newId, x: pos.x, y: pos.y, el: currentElement, charge: 0 };
+      atoms.push(newAtom);
+      dragStartAtom = newAtom;
+      dragPos = pos;
+      draw();
+    }
+  }
+});
+
+canvas.addEventListener("mouseup", (e) => {
+  if (!dragStartAtom) return;
+  const pos = dragPos || getMousePos(e);
+  const targetAtom = findAtomAt(pos);
+
+  if (targetAtom && targetAtom !== dragStartAtom) {
+    saveState();
+    const exists = bonds.find(
+      (b) => (b.a1 === dragStartAtom.id && b.a2 === targetAtom.id) || (b.a1 === targetAtom.id && b.a2 === dragStartAtom.id)
+    );
+    if (exists) {
+      exists.order = currentBondOrder;
+    } else {
+      bonds.push({ a1: dragStartAtom.id, a2: targetAtom.id, order: currentBondOrder });
+    }
+  } else if (Math.hypot(pos.x - dragStartAtom.x, pos.y - dragStartAtom.y) > 12) {
+    saveState();
+    const newId = Date.now() + Math.random();
+    atoms.push({ id: newId, x: pos.x, y: pos.y, el: currentElement, charge: 0 });
+    bonds.push({ a1: dragStartAtom.id, a2: newId, order: currentBondOrder });
+  } else {
+    // 單純點擊現有原子 -> 切換為當前選中的元素
+    if (dragStartAtom.el !== currentElement) {
+      saveState();
+      dragStartAtom.el = currentElement;
+    }
+  }
+
+  dragStartAtom = null;
+  dragPos = null;
+  draw();
+});
+
+function addRingAt(center, type, attachAtom) {
+  const sides = type === "cyclopentane" ? 5 : 6;
+  const radius = 38;
+  const ringAtoms = [];
+
+  for (let i = 0; i < sides; i++) {
+    const angle = (i * 2 * Math.PI) / sides - Math.PI / 2;
+    const x = center.x + radius * Math.cos(angle);
+    const y = center.y + radius * Math.sin(angle);
+    if (i === 0 && attachAtom) {
+      ringAtoms.push(attachAtom);
+    } else {
+      const a = { id: Date.now() + Math.random() + i, x, y, el: "C", charge: 0 };
+      atoms.push(a);
+      ringAtoms.push(a);
+    }
+  }
+
+  for (let i = 0; i < sides; i++) {
+    const a1 = ringAtoms[i];
+    const a2 = ringAtoms[(i + 1) % sides];
+    const order = type === "benzene" && i % 2 === 0 ? 2 : 1;
+    bonds.push({ a1: a1.id, a2: a2.id, order });
+  }
+}
+
+// === 綁定懸浮工具島事件 ===
+function bindUIEvents() {
   document.querySelectorAll(".dock-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".dock-btn").forEach((b) => b.classList.remove("active"));
+      document.getElementById("btnErase").classList.remove("active");
       btn.classList.add("active");
-      if (!composer) return;
 
-      const bond = btn.getAttribute("data-bond");
-      const charge = btn.getAttribute("data-charge");
-      const ring = btn.getAttribute("data-ring");
-
-      if (bond) {
-        composer.setActiveIaControllerId("MolBond");
-      } else if (charge) {
-        composer.setActiveIaControllerId("MolCharge");
-      } else if (ring) {
-        composer.setActiveIaControllerId("MolRing");
-      }
+      currentMode = btn.getAttribute("data-tool");
+      if (currentMode === "bond") currentBondOrder = Number(btn.getAttribute("data-order"));
+      if (currentMode === "ring") currentRingType = btn.getAttribute("data-ring");
+      if (currentMode === "charge") currentChargeVal = Number(btn.getAttribute("data-val"));
     });
   });
 
-  // 右側工具島：元素快選
   document.querySelectorAll(".atom-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".atom-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
-      if (!composer) return;
-      composer.setActiveIaControllerId("MolAtom");
+      currentElement = btn.getAttribute("data-atom");
+      if (currentMode === "erase") {
+        currentMode = "bond";
+        document.getElementById("btnErase").classList.remove("active");
+      }
     });
   });
 
-  // 切換單純 2D / 雙視窗模式
+  document.getElementById("btnErase").addEventListener("click", (e) => {
+    currentMode = "erase";
+    document.querySelectorAll(".dock-btn").forEach((b) => b.classList.remove("active"));
+    e.target.classList.add("active");
+  });
+
+  document.getElementById("btnClear").addEventListener("click", () => {
+    saveState();
+    atoms = [];
+    bonds = [];
+    draw();
+  });
+
+  document.getElementById("btnUndo").addEventListener("click", () => {
+    if (history.length === 0) return;
+    redoStack.push(JSON.stringify({ atoms, bonds }));
+    const prev = JSON.parse(history.pop());
+    atoms = prev.atoms;
+    bonds = prev.bonds;
+    draw();
+  });
+
+  document.getElementById("btnRedo").addEventListener("click", () => {
+    if (redoStack.length === 0) return;
+    history.push(JSON.stringify({ atoms, bonds }));
+    const next = JSON.parse(redoStack.pop());
+    atoms = next.atoms;
+    bonds = next.bonds;
+    draw();
+  });
+
+  document.getElementById("btnCenter").addEventListener("click", () => {
+    if (atoms.length === 0) return;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const avgX = atoms.reduce((s, a) => s + a.x, 0) / atoms.length;
+    const avgY = atoms.reduce((s, a) => s + a.y, 0) / atoms.length;
+    atoms.forEach((a) => {
+      a.x += rect.width / 2 - avgX;
+      a.y += rect.height / 2 - avgY;
+    });
+    draw();
+  });
+
+  document.getElementById("btnZoomIn").addEventListener("click", () => {
+    zoom = Math.min(2.5, zoom + 0.1);
+    document.getElementById("zoomBadge").textContent = `${Math.round(zoom * 100)}%`;
+    draw();
+  });
+
+  document.getElementById("btnZoomOut").addEventListener("click", () => {
+    zoom = Math.max(0.4, zoom - 0.1);
+    document.getElementById("zoomBadge").textContent = `${Math.round(zoom * 100)}%`;
+    draw();
+  });
+
   document.getElementById("toggle3DBtn").addEventListener("click", (e) => {
-    const viewerPane = document.getElementById("viewerPane");
-    viewerPane.classList.toggle("hidden");
+    document.getElementById("viewerPane").classList.toggle("hidden");
     e.target.classList.toggle("active");
-    setTimeout(() => {
-      const container = document.getElementById("kekule_canvas");
-      composer.setDimension(container.clientWidth + "px", container.clientHeight + "px");
-    }, 50);
+    setTimeout(resizeCanvas, 50);
+  });
+
+  document.getElementById("syncBtn").addEventListener("click", () => {
+    const molfile = exportCanvasToMolfile();
+    if (!molfile) return;
+    try {
+      const oclMol = OCL.Molecule.fromMolfile(molfile);
+      const smiles = oclMol.toSmiles();
+      if (smiles) processMolecule(smiles, false);
+    } catch (err) {
+      alert("請確認畫布上的化學結構連線完整");
+    }
+  });
+
+  document.getElementById("searchInput").addEventListener("keypress", (e) => {
+    if (e.key === "Enter") {
+      const val = e.target.value.trim();
+      if (!val) return;
+      const isSmiles = /^[A-Za-z0-9@+\-\[\]\(\)\\\/%=#$]+$/.test(val) && /[=\(\)\[\]#1-9]/.test(val);
+      processMolecule(val, !isSmiles);
+    }
+  });
+
+  document.getElementById("styleSelect").addEventListener("change", (e) => {
+    apply3DStyle(e.target.value);
+  });
+
+  document.getElementById("exportBtn").addEventListener("click", () => {
+    if (!currentSdfData) return;
+    const blob = new Blob([currentSdfData], { type: "chemical/x-mdl-sdfile" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "molecule_3d.sdf";
+    a.click();
   });
 }
 
-function handleUserQuery(input) {
-  const trimmed = input.trim();
-  if (!trimmed) return;
-  const looksLikeSmiles = /^[A-Za-z0-9@+\-\[\]\(\)\\\/%=#$]+$/.test(trimmed) && /[=\(\)\[\]#1-9]/.test(trimmed);
-  processMolecule(trimmed, !looksLikeSmiles);
+// === 3D 渲染與雙引擎計算 ===
+function init3DViewer() {
+  viewer3D = $3Dmol.createViewer("viewer_3d", { backgroundColor: "#0f172a" });
 }
 
 async function processMolecule(query, isName = false) {
@@ -125,7 +520,7 @@ async function processMolecule(query, isName = false) {
   const badgeEl = document.getElementById("sourceBadge");
   const formulaEl = document.getElementById("molFormula");
 
-  infoEl.textContent = "解析 3D 結構中...";
+  infoEl.textContent = "計算 3D 結構中...";
 
   try {
     const type = isName ? "name" : "smiles";
@@ -148,10 +543,7 @@ async function processMolecule(query, isName = false) {
       formulaEl.textContent = `${props.MolecularFormula} (${props.MolecularWeight})`;
       infoEl.textContent = props.IUPACName || "";
 
-      if (isName && composer) {
-        const kekuleMol = Kekule.IO.loadFormatData(currentSdfData, "sdf");
-        composer.setChemObj(kekuleMol);
-      }
+      if (isName) loadSmilesTo2D(query);
       render3DModel(currentSdfData);
       return;
     }
@@ -159,7 +551,7 @@ async function processMolecule(query, isName = false) {
     if (!isName) {
       generateLocal3D(query);
     } else {
-      throw new Error("查無此化合物名稱");
+      throw new Error("找不到此化合物");
     }
   } catch (err) {
     if (!isName) {
@@ -222,36 +614,3 @@ function apply3DStyle(styleType) {
   }
   viewer3D.render();
 }
-
-document.getElementById("syncBtn").addEventListener("click", () => {
-  if (!composer) return;
-  const chemObj = composer.getChemObj();
-  if (!chemObj) return;
-  const molData = Kekule.IO.saveFormatData(chemObj, "mol");
-  const oclMol = OCL.Molecule.fromMolfile(molData);
-  const smiles = oclMol.toSmiles();
-  if (smiles && smiles.trim() !== "") {
-    processMolecule(smiles.trim(), false);
-  }
-});
-
-document.getElementById("searchBtn").addEventListener("click", () => {
-  handleUserQuery(document.getElementById("searchInput").value);
-});
-
-document.getElementById("searchInput").addEventListener("keypress", (e) => {
-  if (e.key === "Enter") handleUserQuery(e.target.value);
-});
-
-document.getElementById("styleSelect").addEventListener("change", (e) => {
-  apply3DStyle(e.target.value);
-});
-
-document.getElementById("exportBtn").addEventListener("click", () => {
-  if (!currentSdfData) return;
-  const blob = new Blob([currentSdfData], { type: "chemical/x-mdl-sdfile" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "molecule_3d.sdf";
-  a.click();
-});
