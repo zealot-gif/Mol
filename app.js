@@ -56,6 +56,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
 function buildPeriodicTable() {
   const grid = document.getElementById("ptGrid");
+  if (!grid) return;
   PERIODIC_TABLE.forEach(([el, row, col, cat]) => {
     const cell = document.createElement("button");
     cell.className = `pt-cell ${cat}`;
@@ -249,7 +250,6 @@ function draw() {
       ctx.fillText(a.el + chargeStr, a.x, a.y);
     }
 
-    // 繪製孤電子對 (成對黑點圍繞原子四個方位：上、右、下、左)
     if (a.lonePairs && a.lonePairs > 0) {
       drawLonePairs(a);
     }
@@ -291,7 +291,6 @@ function drawCurvedArrow(x1, y1, x2, y2, highlight = false) {
   const dist = Math.hypot(dx, dy);
   if (dist < 8) return;
 
-  // 計算二次貝茲曲線控制點（向上/外側彎曲）
   const mx = (x1 + x2) / 2;
   const my = (y1 + y2) / 2;
   const nx = -dy / dist;
@@ -304,13 +303,11 @@ function drawCurvedArrow(x1, y1, x2, y2, highlight = false) {
   ctx.fillStyle = highlight ? "#0284c7" : "#e11d48";
   ctx.lineWidth = 1.8;
 
-  // 畫弧線
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.quadraticCurveTo(cx, cy, x2, y2);
   ctx.stroke();
 
-  // 畫終點箭頭
   const angle = Math.atan2(y2 - cy, x2 - cx);
   const headLen = 8;
   ctx.beginPath();
@@ -412,7 +409,7 @@ canvas.addEventListener("mousedown", (e) => {
 
   if (currentMode === "lonepair" && hitAtom) {
     saveState();
-    hitAtom.lonePairs = ((hitAtom.lonePairs || 0) + 1) % 5; // 0 -> 1 -> 2 -> 3 -> 4 -> 0
+    hitAtom.lonePairs = ((hitAtom.lonePairs || 0) + 1) % 5;
     draw();
     return;
   }
@@ -558,13 +555,18 @@ function bindUIEvents() {
     });
   });
 
-  // 週期表彈窗開關
-  document.getElementById("openPtBtn").addEventListener("click", () => {
-    document.getElementById("ptModal").classList.toggle("hidden");
-  });
-  document.getElementById("closePtBtn").addEventListener("click", () => {
-    document.getElementById("ptModal").classList.add("hidden");
-  });
+  const openPtBtn = document.getElementById("openPtBtn");
+  const closePtBtn = document.getElementById("closePtBtn");
+  if (openPtBtn) {
+    openPtBtn.addEventListener("click", () => {
+      document.getElementById("ptModal").classList.toggle("hidden");
+    });
+  }
+  if (closePtBtn) {
+    closePtBtn.addEventListener("click", () => {
+      document.getElementById("ptModal").classList.add("hidden");
+    });
+  }
 
   document.getElementById("btnErase").addEventListener("click", (e) => {
     currentMode = "erase";
@@ -674,11 +676,40 @@ async function processMolecule(query, isName = false) {
   const badgeEl = document.getElementById("sourceBadge");
   const formulaEl = document.getElementById("molFormula");
 
-  infoEl.textContent = "計算 3D 結構中...";
+  let searchQuery = query;
+
+  // 若包含中文字元，自動翻譯成英文化學名稱
+  if (isName && /[\u4e00-\u9fa5]/.test(query)) {
+    infoEl.textContent = `正在將「${query}」翻譯為英文化學名...`;
+    const specialDict = {
+      "阿斯匹靈": "aspirin", "阿司匹林": "aspirin", "青黴素": "penicillin",
+      "盤尼西林": "penicillin", "布洛芬": "ibuprofen", "對乙醯氨基酚": "acetaminophen",
+      "普拿疼": "acetaminophen", "乙醇": "ethanol", "酒精": "ethanol",
+      "乙酸": "acetic acid", "醋酸": "acetic acid", "丙酮": "acetone"
+    };
+
+    if (specialDict[query]) {
+      searchQuery = specialDict[query];
+    } else {
+      try {
+        const transRes = await fetch(
+          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(query)}&langpair=zh-TW|en`
+        );
+        const transData = await transRes.json();
+        if (transData?.responseData?.translatedText) {
+          searchQuery = transData.responseData.translatedText.toLowerCase().trim();
+        }
+      } catch (e) {
+        console.warn("自動翻譯連線失敗:", e);
+      }
+    }
+  }
+
+  infoEl.textContent = `正在向資料庫檢索「${searchQuery}」...`;
 
   try {
     const type = isName ? "name" : "smiles";
-    const encoded = encodeURIComponent(query);
+    const encoded = encodeURIComponent(searchQuery);
 
     const sdfRes = await fetch(
       `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${type}/${encoded}/SDF?record_type=3d`
@@ -687,7 +718,7 @@ async function processMolecule(query, isName = false) {
     if (sdfRes.ok) {
       currentSdfData = await sdfRes.text();
       const propRes = await fetch(
-        `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${type}/${encoded}/property/MolecularFormula,MolecularWeight,IUPACName/JSON`
+        `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${type}/${encoded}/property/MolecularFormula,MolecularWeight,IUPACName,CanonicalSMILES/JSON`
       );
       const propData = await propRes.json();
       const props = propData.PropertyTable.Properties[0];
@@ -695,21 +726,23 @@ async function processMolecule(query, isName = false) {
       badgeEl.className = "badge cloud";
       badgeEl.textContent = "☁ PubChem";
       formulaEl.textContent = `${props.MolecularFormula} (${props.MolecularWeight})`;
-      infoEl.textContent = props.IUPACName || "";
+      infoEl.textContent = `${searchQuery} ｜ ${props.IUPACName || ""}`;
 
-      if (isName) loadSmilesTo2D(query);
+      if (isName && props.CanonicalSMILES) {
+        loadSmilesTo2D(props.CanonicalSMILES);
+      }
       render3DModel(currentSdfData);
       return;
     }
 
     if (!isName) {
-      generateLocal3D(query);
+      generateLocal3D(searchQuery);
     } else {
-      throw new Error("找不到此化合物");
+      throw new Error(`資料庫找不到「${searchQuery}」（請嘗試輸入英文名或 SMILES）`);
     }
   } catch (err) {
     if (!isName) {
-      generateLocal3D(query);
+      generateLocal3D(searchQuery);
     } else {
       badgeEl.className = "badge local";
       badgeEl.textContent = "提示";
