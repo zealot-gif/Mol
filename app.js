@@ -364,8 +364,49 @@ function pointToSegDist(px, py, x1, y1, x2, y2) {
   return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
 }
 
+// === 右鍵旋轉狀態變數 ===
+let isRightRotating = false;
+let rotateCenter = { x: 0, y: 0 };
+let lastRotateAngle = 0;
+
+// 阻擋畫布預設右鍵選單，讓右鍵專用於旋轉結構
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
 canvas.addEventListener("mousemove", (e) => {
   const pos = getMousePos(e);
+
+  // 處理右鍵拖曳旋轉整個 2D 結構
+  if (isRightRotating) {
+    const currentAngle = Math.atan2(pos.y - rotateCenter.y, pos.x - rotateCenter.x);
+    const deltaAngle = currentAngle - lastRotateAngle;
+    lastRotateAngle = currentAngle;
+
+    const cos = Math.cos(deltaAngle);
+    const sin = Math.sin(deltaAngle);
+
+    atoms.forEach((a) => {
+      const dx = a.x - rotateCenter.x;
+      const dy = a.y - rotateCenter.y;
+      a.x = rotateCenter.x + dx * cos - dy * sin;
+      a.y = rotateCenter.y + dx * sin + dy * cos;
+    });
+
+    arrows.forEach((arr) => {
+      const dx1 = arr.x1 - rotateCenter.x;
+      const dy1 = arr.y1 - rotateCenter.y;
+      arr.x1 = rotateCenter.x + dx1 * cos - dy1 * sin;
+      arr.y1 = rotateCenter.y + dx1 * sin + dy1 * cos;
+
+      const dx2 = arr.x2 - rotateCenter.x;
+      const dy2 = arr.y2 - rotateCenter.y;
+      arr.x2 = rotateCenter.x + dx2 * cos - dy2 * sin;
+      arr.y2 = rotateCenter.y + dx2 * sin + dy2 * cos;
+    });
+
+    draw();
+    return;
+  }
+
   hoverAtom = findAtomAt(pos);
   hoverBond = hoverAtom ? null : findBondAt(pos);
   hoverArrow = (!hoverAtom && !hoverBond) ? findArrowAt(pos) : null;
@@ -387,6 +428,22 @@ canvas.addEventListener("mousemove", (e) => {
 
 canvas.addEventListener("mousedown", (e) => {
   const pos = getMousePos(e);
+
+  // 按下滑鼠右鍵 (e.button === 2) -> 啟動 2D 結構旋轉
+  if (e.button === 2) {
+    if (atoms.length === 0) return;
+    saveState(); // 儲存旋轉前狀態，支援「復原 (Undo)」
+    isRightRotating = true;
+    rotateCenter = {
+      x: atoms.reduce((sum, a) => sum + a.x, 0) / atoms.length,
+      y: atoms.reduce((sum, a) => sum + a.y, 0) / atoms.length
+    };
+    lastRotateAngle = Math.atan2(pos.y - rotateCenter.y, pos.x - rotateCenter.x);
+    canvas.style.cursor = "grabbing";
+    return;
+  }
+
+  // 以下維持原本左鍵繪圖互動
   const hitAtom = findAtomAt(pos);
   const hitBond = hitAtom ? null : findBondAt(pos);
   const hitArrow = (!hitAtom && !hitBond) ? findArrowAt(pos) : null;
@@ -457,7 +514,14 @@ canvas.addEventListener("mousedown", (e) => {
   }
 });
 
-canvas.addEventListener("mouseup", (e) => {
+window.addEventListener("mouseup", (e) => {
+  // 結束右鍵旋轉（綁定在 window 上，即使滑鼠拖出畫布外放開也能正常結束）
+  if (e.button === 2 && isRightRotating) {
+    isRightRotating = false;
+    canvas.style.cursor = "crosshair";
+    return;
+  }
+
   if (dragArrowStart) {
     const pos = getMousePos(e);
     const targetAtom = findAtomAt(pos);
