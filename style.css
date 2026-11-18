@@ -150,3 +150,58 @@ html, body {
   .viewer-pane { height: 380px; flex: none; }
   .top-menu { max-width: 95%; overflow-x: auto; }
 }
+
+/* 3D 單鍵二面角旋轉控制盒 */
+.viewer-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.torsion-box {
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #f1f5f9;
+  width: 210px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.torsion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.torsion-header select {
+  background: #1e293b;
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.76rem;
+}
+
+#torsionAngleLabel {
+  color: #fbbf24;
+  font-variant-numeric: tabular-nums;
+}
+
+#torsionSlider {
+  width: 100%;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
+.torsion-status {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  text-align: right;
+}
