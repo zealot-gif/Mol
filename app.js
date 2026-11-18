@@ -1,12 +1,11 @@
 // === 分子與反應機構資料結構 ===
 let atoms = [];  // { id, x, y, el, charge, lonePairs }
 let bonds = [];  // { a1, a2, order }
-let arrows = []; // { x1, y1, x2, y2 } (電子轉移彎箭頭)
+let arrows = []; // { x1, y1, x2, y2 }
 let history = [];
 let redoStack = [];
 
-// 當前工具狀態
-let currentMode = "bond"; // "bond" | "ring" | "charge" | "lonepair" | "arrow" | "erase"
+let currentMode = "bond";
 let currentBondOrder = 1;
 let currentRingType = "benzene";
 let currentChargeVal = 1;
@@ -20,8 +19,20 @@ let dragStartAtom = null;
 let dragArrowStart = null;
 let dragPos = null;
 
+let isRightRotating = false;
+let rotateCenter = { x: 0, y: 0 };
+let lastRotateAngle = 0;
+
+let isTwoFingerGesture = false;
+let lastTouchAngle = 0;
+let lastTouchDist = 0;
+
 let viewer3D = null;
 let currentSdfData = "";
+
+let base3DAtoms = [];
+let base3DBonds = [];
+let rotatableBonds = [];
 
 const ATOM_COLORS = {
   C: "#1e293b", H: "#475569", N: "#2563eb", O: "#dc2626",
@@ -29,7 +40,6 @@ const ATOM_COLORS = {
   Br: "#991b1b", I: "#7e22ce", B: "#be185d", Mg: "#059669", Li: "#7c3aed"
 };
 
-// 元素週期表資料 (符號, 週期 row, 族 col, 分類)
 const PERIODIC_TABLE = [
   ["H",1,1,"nonmetal"],["He",1,18,"noble"],
   ["Li",2,1,"alkali"],["Be",2,2,"alkaline"],["B",2,13,"metalloid"],["C",2,14,"nonmetal"],["N",2,15,"nonmetal"],["O",2,16,"nonmetal"],["F",2,17,"halogen"],["Ne",2,18,"noble"],
@@ -174,7 +184,6 @@ function exportCanvasToMolfile() {
   return lines.join("\n");
 }
 
-// === 繪製畫布（化學鍵 + 原子 + 孤電子對 + 電子轉移彎箭頭）===
 function draw() {
   const rect = canvas.parentElement.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
@@ -184,7 +193,6 @@ function draw() {
   ctx.scale(zoom, zoom);
   ctx.translate(-rect.width / 2, -rect.height / 2);
 
-  // 1. 化學鍵
   bonds.forEach((b) => {
     const a1 = atoms.find((a) => a.id === b.a1);
     const a2 = atoms.find((a) => a.id === b.a2);
@@ -215,7 +223,6 @@ function draw() {
     }
   });
 
-  // 2. 化學鍵拖曳預覽
   if (dragStartAtom && dragPos) {
     ctx.strokeStyle = "#38bdf8";
     ctx.lineWidth = 2;
@@ -224,7 +231,6 @@ function draw() {
     ctx.setLineDash([]);
   }
 
-  // 3. 原子與孤電子對 (Lone Pairs)
   atoms.forEach((a) => {
     const degree = bonds.filter((b) => b.a1 === a.id || b.a2 === a.id).length;
     const showLabel = a.el !== "C" || degree === 0 || a.charge !== 0 || (a.lonePairs && a.lonePairs > 0);
@@ -255,7 +261,6 @@ function draw() {
     }
   });
 
-  // 4. 電子轉移彎箭頭 (Curved Arrows)
   arrows.forEach((arr) => {
     drawCurvedArrow(arr.x1, arr.y1, arr.x2, arr.y2, hoverArrow === arr);
   });
@@ -268,10 +273,10 @@ function draw() {
 
 function drawLonePairs(atom) {
   const dirs = [
-    { dx: 0, dy: -13, px: 2.6, py: 0 }, // 上
-    { dx: 13, dy: 0, px: 0, py: 2.6 },  // 右
-    { dx: 0, dy: 13, px: 2.6, py: 0 },  // 下
-    { dx: -13, dy: 0, px: 0, py: 2.6 }  // 左
+    { dx: 0, dy: -13, px: 2.6, py: 0 },
+    { dx: 13, dy: 0, px: 0, py: 2.6 },
+    { dx: 0, dy: 13, px: 2.6, py: 0 },
+    { dx: -13, dy: 0, px: 0, py: 2.6 }
   ];
   ctx.fillStyle = "#0f172a";
   for (let i = 0; i < Math.min(4, atom.lonePairs); i++) {
@@ -364,18 +369,11 @@ function pointToSegDist(px, py, x1, y1, x2, y2) {
   return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
 }
 
-// === 右鍵旋轉狀態變數 ===
-let isRightRotating = false;
-let rotateCenter = { x: 0, y: 0 };
-let lastRotateAngle = 0;
-
-// 阻擋畫布預設右鍵選單，讓右鍵專用於旋轉結構
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 canvas.addEventListener("mousemove", (e) => {
   const pos = getMousePos(e);
 
-  // 處理右鍵拖曳旋轉整個 2D 結構
   if (isRightRotating) {
     const currentAngle = Math.atan2(pos.y - rotateCenter.y, pos.x - rotateCenter.x);
     const deltaAngle = currentAngle - lastRotateAngle;
@@ -429,10 +427,9 @@ canvas.addEventListener("mousemove", (e) => {
 canvas.addEventListener("mousedown", (e) => {
   const pos = getMousePos(e);
 
-  // 按下滑鼠右鍵 (e.button === 2) -> 啟動 2D 結構旋轉
   if (e.button === 2) {
     if (atoms.length === 0) return;
-    saveState(); // 儲存旋轉前狀態，支援「復原 (Undo)」
+    saveState();
     isRightRotating = true;
     rotateCenter = {
       x: atoms.reduce((sum, a) => sum + a.x, 0) / atoms.length,
@@ -443,7 +440,6 @@ canvas.addEventListener("mousedown", (e) => {
     return;
   }
 
-  // 以下維持原本左鍵繪圖互動
   const hitAtom = findAtomAt(pos);
   const hitBond = hitAtom ? null : findBondAt(pos);
   const hitArrow = (!hitAtom && !hitBond) ? findArrowAt(pos) : null;
@@ -515,7 +511,6 @@ canvas.addEventListener("mousedown", (e) => {
 });
 
 window.addEventListener("mouseup", (e) => {
-  // 結束右鍵旋轉（綁定在 window 上，即使滑鼠拖出畫布外放開也能正常結束）
   if (e.button === 2 && isRightRotating) {
     isRightRotating = false;
     canvas.style.cursor = "crosshair";
@@ -566,22 +561,8 @@ window.addEventListener("mouseup", (e) => {
 });
 
 // === 手機觸控支援（單指繪圖 + 雙指旋轉與縮放） ===
-let isTwoFingerGesture = false;
-let lastTouchAngle = 0;
-let lastTouchDist = 0;
-
-function getTouchPos(touch) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: (touch.clientX - rect.left - rect.width / 2) / zoom + rect.width / 2,
-    y: (touch.clientY - rect.top - rect.height / 2) / zoom + rect.height / 2
-  };
-}
-
 canvas.addEventListener("touchstart", (e) => {
-  e.preventDefault(); // 防止滑動畫布時整個網頁跟著上下捲動
-
-  // 雙指觸控：啟動「旋轉 + 縮放」模式
+  e.preventDefault();
   if (e.touches.length === 2) {
     isTwoFingerGesture = true;
     dragStartAtom = null;
@@ -603,7 +584,6 @@ canvas.addEventListener("touchstart", (e) => {
     return;
   }
 
-  // 單指觸控：模擬滑鼠左鍵按下
   if (e.touches.length === 1 && !isTwoFingerGesture) {
     const t = e.touches[0];
     canvas.dispatchEvent(new MouseEvent("mousedown", {
@@ -616,13 +596,10 @@ canvas.addEventListener("touchstart", (e) => {
 
 canvas.addEventListener("touchmove", (e) => {
   e.preventDefault();
-
-  // 雙指移動：計算旋轉角度差與縮放比例
   if (e.touches.length === 2 && isTwoFingerGesture) {
     const t1 = e.touches[0];
     const t2 = e.touches[1];
 
-    // 1. 旋轉結構
     const currentAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
     const deltaAngle = currentAngle - lastTouchAngle;
     lastTouchAngle = currentAngle;
@@ -651,7 +628,6 @@ canvas.addEventListener("touchmove", (e) => {
       });
     }
 
-    // 2. 雙指開合縮放
     const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
     if (lastTouchDist > 0) {
       const scaleRatio = currentDist / lastTouchDist;
@@ -659,12 +635,10 @@ canvas.addEventListener("touchmove", (e) => {
       document.getElementById("zoomBadge").textContent = `${Math.round(zoom * 100)}%`;
     }
     lastTouchDist = currentDist;
-
     draw();
     return;
   }
 
-  // 單指拖曳：模擬滑鼠移動
   if (e.touches.length === 1 && !isTwoFingerGesture) {
     const t = e.touches[0];
     canvas.dispatchEvent(new MouseEvent("mousemove", {
@@ -785,19 +759,6 @@ function bindUIEvents() {
     draw();
   });
 
-  document.getElementById("btnCenter").addEventListener("click", () => {
-    if (atoms.length === 0) return;
-    const rect = canvas.parentElement.getBoundingClientRect();
-    const avgX = atoms.reduce((s, a) => s + a.x, 0) / atoms.length;
-    const avgY = atoms.reduce((s, a) => s + a.y, 0) / atoms.length;
-    const dx = rect.width / 2 - avgX;
-    const dy = rect.height / 2 - avgY;
-    atoms.forEach((a) => { a.x += dx; a.y += dy; });
-    arrows.forEach((arr) => { arr.x1 += dx; arr.y1 += dy; arr.x2 += dx; arr.y2 += dy; });
-    draw();
-  });
-
-// === 1. ✨ 自動重整結構（標準鍵角與正六邊形優化） ===
   let chairFlipState = false;
 
   document.getElementById("btnClean").addEventListener("click", () => {
@@ -806,11 +767,8 @@ function bindUIEvents() {
     if (!molfile) return;
 
     try {
-      // 保留原有的孤電子對紀錄（依原子順序對應）
       const savedLonePairs = atoms.map((a) => a.lonePairs || 0);
-
       const mol = OCL.Molecule.fromMolfile(molfile);
-      // 強制重新計算最美觀的標準 2D 平面座標（正六邊形、標準 120 度鍵角）
       mol.inventCoordinates();
       mol.ensureHelperArrays(7);
 
@@ -833,7 +791,6 @@ function bindUIEvents() {
         });
       }
 
-      // 保持在原本分子的中心位置，不會亂跑
       const oldCenterX = atoms.reduce((s, a) => s + a.x, 0) / atoms.length;
       const oldCenterY = atoms.reduce((s, a) => s + a.y, 0) / atoms.length;
       const offsetX = oldCenterX - (minX + maxX) / 2;
@@ -858,7 +815,6 @@ function bindUIEvents() {
     }
   });
 
-  // === 2. 🪑 轉換為環己烷椅型構象（Chair Conformation + 環翻轉） ===
   document.getElementById("btnChair").addEventListener("click", () => {
     const ring6 = findSixMemberedRing();
     if (!ring6) {
@@ -867,47 +823,69 @@ function bindUIEvents() {
     }
 
     saveState();
-    const cx = ring6.reduce((s, a) => s + a.x, 0) / 6;
-    const cy = ring6.reduce((s, a) => s + a.y, 0) / 6;
+    const beforeCenterX = atoms.reduce((s, a) => s + a.x, 0) / atoms.length;
+    const beforeCenterY = atoms.reduce((s, a) => s + a.y, 0) / atoms.length;
 
-    // 經典有機化學教科書角度的椅型 6 頂點相對座標（支援兩種翻轉構象）
+    const ringCx = ring6.reduce((s, a) => s + a.x, 0) / 6;
+    const ringCy = ring6.reduce((s, a) => s + a.y, 0) / 6;
+
     const chairOffsets = !chairFlipState
       ? [
-          { dx: -46, dy:  10 }, // C1 (左下)
-          { dx: -14, dy: -16 }, // C2 (左上)
-          { dx:  26, dy:  -6 }, // C3 (中上)
-          { dx:  46, dy: -22 }, // C4 (右上尖端)
-          { dx:  14, dy:  16 }, // C5 (右下)
-          { dx: -26, dy:   6 }  // C6 (中下)
+          { dx: -46, dy:  12 },
+          { dx: -14, dy: -14 },
+          { dx:  26, dy:  -4 },
+          { dx:  46, dy: -20 },
+          { dx:  14, dy:  16 },
+          { dx: -26, dy:  10 }
         ]
       : [
-          { dx: -46, dy: -22 }, // 環翻轉後 C1 (左上尖端)
-          { dx: -14, dy:  16 }, // C2 (左下)
-          { dx:  26, dy:   6 }, // C3 (中下)
-          { dx:  46, dy:  10 }, // C4 (右下)
-          { dx:  14, dy: -16 }, // C5 (右上)
-          { dx: -26, dy:  -6 }  // C6 (中上)
+          { dx: -46, dy: -20 },
+          { dx: -14, dy:  16 },
+          { dx:  26, dy:  10 },
+          { dx:  46, dy:  12 },
+          { dx:  14, dy: -14 },
+          { dx: -26, dy:  -4 }
         ];
 
     chairFlipState = !chairFlipState;
+    const movedSet = new Set(ring6.map((r) => r.id));
 
-    // 計算每個環上原子原本的幾何中心方向，同步平移連接在環上的取代基（如 -OH, -CH3）
     ring6.forEach((atom, idx) => {
-      const targetX = cx + chairOffsets[idx].dx;
-      const targetY = cy + chairOffsets[idx].dy;
+      const targetX = ringCx + chairOffsets[idx].dx;
+      const targetY = ringCy + chairOffsets[idx].dy;
       const moveX = targetX - atom.x;
       const moveY = targetY - atom.y;
 
-      // 找出只連在這個環原子外側的取代基一起移動
-      moveSubstituents(atom.id, new Set(ring6.map((r) => r.id)), moveX, moveY);
-
+      moveSubstituents(atom.id, movedSet, moveX, moveY);
       atom.x = targetX;
       atom.y = targetY;
     });
 
+    const afterCenterX = atoms.reduce((s, a) => s + a.x, 0) / atoms.length;
+    const afterCenterY = atoms.reduce((s, a) => s + a.y, 0) / atoms.length;
+    const fixX = beforeCenterX - afterCenterX;
+    const fixY = beforeCenterY - afterCenterY;
+
+    atoms.forEach((a) => {
+      a.x += fixX;
+      a.y += fixY;
+    });
+
     draw();
   });
-  
+
+  document.getElementById("btnCenter").addEventListener("click", () => {
+    if (atoms.length === 0) return;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const avgX = atoms.reduce((s, a) => s + a.x, 0) / atoms.length;
+    const avgY = atoms.reduce((s, a) => s + a.y, 0) / atoms.length;
+    const dx = rect.width / 2 - avgX;
+    const dy = rect.height / 2 - avgY;
+    atoms.forEach((a) => { a.x += dx; a.y += dy; });
+    arrows.forEach((arr) => { arr.x1 += dx; arr.y1 += dy; arr.x2 += dx; arr.y2 += dy; });
+    draw();
+  });
+
   document.getElementById("btnZoomIn").addEventListener("click", () => {
     zoom = Math.min(2.5, zoom + 0.1);
     document.getElementById("zoomBadge").textContent = `${Math.round(zoom * 100)}%`;
@@ -959,6 +937,69 @@ function bindUIEvents() {
     a.download = "molecule_3d.sdf";
     a.click();
   });
+
+  document.getElementById("torsionSlider").addEventListener("input", (e) => {
+    const deg = Number(e.target.value);
+    document.getElementById("torsionAngleLabel").textContent = `${deg}°`;
+
+    const mod120 = deg % 120;
+    const statusEl = document.getElementById("torsionStatus");
+    if (mod120 <= 8 || mod120 >= 112) {
+      statusEl.textContent = "✦ 交錯式 (Staggered · 能量最低)";
+      statusEl.style.color = "#38bdf8";
+    } else if (Math.abs(mod120 - 60) <= 8) {
+      statusEl.textContent = "⚡ 重疊式 (Eclipsed · 能量最高)";
+      statusEl.style.color = "#fbbf24";
+    } else {
+      statusEl.textContent = "過渡扭轉角 (Skew)";
+      statusEl.style.color = "#94a3b8";
+    }
+
+    const bondIdx = Number(document.getElementById("bondSelect").value);
+    const targetBond = rotatableBonds[bondIdx];
+    if (!targetBond) return;
+
+    const pA = base3DAtoms[targetBond.a1];
+    const pB = base3DAtoms[targetBond.a2];
+
+    let ux = pB.x - pA.x;
+    let uy = pB.y - pA.y;
+    let uz = pB.z - pA.z;
+    const len = Math.hypot(ux, uy, uz) || 1;
+    ux /= len; uy /= len; uz /= len;
+
+    const rad = (deg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+
+    const rotatedAtoms = base3DAtoms.map((a) => ({ ...a }));
+    targetBond.movingIndices.forEach((idx) => {
+      if (idx === targetBond.a2) return;
+      const atom = rotatedAtoms[idx];
+      const vx = atom.x - pB.x;
+      const vy = atom.y - pB.y;
+      const vz = atom.z - pB.z;
+
+      const dot = ux * vx + uy * vy + uz * vz;
+      const crossX = uy * vz - uz * vy;
+      const crossY = uz * vx - ux * vz;
+      const crossZ = ux * vy - uy * vx;
+
+      atom.x = pB.x + vx * cos + crossX * sin + ux * dot * (1 - cos);
+      atom.y = pB.y + vy * cos + crossY * sin + uy * dot * (1 - cos);
+      atom.z = pB.z + vz * cos + crossZ * sin + uz * dot * (1 - cos);
+    });
+
+    const newSdf = buildSdfFromAtoms(rotatedAtoms, base3DBonds);
+    viewer3D.clear();
+    viewer3D.addModel(newSdf, "sdf");
+    apply3DStyle(document.getElementById("styleSelect").value);
+  });
+
+  document.getElementById("bondSelect").addEventListener("change", () => {
+    document.getElementById("torsionSlider").value = 0;
+    document.getElementById("torsionAngleLabel").textContent = "0°";
+  });
 }
 
 function init3DViewer() {
@@ -972,7 +1013,6 @@ async function processMolecule(query, isName = false) {
 
   let searchQuery = query;
 
-  // 若包含中文字元，自動翻譯成英文化學名稱
   if (isName && /[\u4e00-\u9fa5]/.test(query)) {
     infoEl.textContent = `正在將「${query}」翻譯為英文化學名...`;
     const specialDict = {
@@ -1005,7 +1045,6 @@ async function processMolecule(query, isName = false) {
     const type = isName ? "name" : "smiles";
     const encoded = encodeURIComponent(searchQuery);
 
-    // 1. 先抓取完整屬性（特別是包含順反 E/Z 與 R/S 立體組態的 IsomericSMILES）
     const propRes = await fetch(
       `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${type}/${encoded}/property/MolecularFormula,MolecularWeight,IUPACName,IsomericSMILES,CanonicalSMILES/JSON`
     );
@@ -1015,7 +1054,6 @@ async function processMolecule(query, isName = false) {
       const props = propData.PropertyTable.Properties[0];
       const exactSmiles = props.IsomericSMILES || props.CanonicalSMILES || props.SMILES;
 
-      // 2. 優先用「精準立體 IsomericSMILES」向 PubChem 請求正確異構物的 3D 結構
       const sdfTarget = exactSmiles ? `smiles/${encodeURIComponent(exactSmiles)}` : `${type}/${encoded}`;
       const sdfRes = await fetch(
         `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${sdfTarget}/SDF?record_type=3d`
@@ -1034,7 +1072,6 @@ async function processMolecule(query, isName = false) {
         currentSdfData = await sdfRes.text();
         render3DModel(currentSdfData);
       } else if (exactSmiles) {
-        // 若 PubChem 該異構物無 3D 檔，直接用帶有 E/Z 標記的 SMILES 在本地演算正確 3D
         generateLocal3D(exactSmiles);
       }
       return;
@@ -1055,6 +1092,7 @@ async function processMolecule(query, isName = false) {
       infoEl.textContent = err.message;
     }
   }
+}
 
 function generateLocal3D(smiles) {
   const infoEl = document.getElementById("molInfo");
@@ -1086,16 +1124,10 @@ function generateLocal3D(smiles) {
   }
 }
 
-// === 3D 單鍵旋轉 (Staggered / Eclipsed 構象觀察器) ===
-let base3DAtoms = []; // 儲存原始 3D 座標
-let base3DBonds = []; // 儲存所有鍵結
-let rotatableBonds = []; // 儲存可旋轉單鍵
-
 function parseSdfForRotation(sdfText) {
   const lines = sdfText.split(/\r?\n/);
   if (lines.length < 4) return null;
 
-  // 支援 V2000 格式解析（PubChem 與本地標準格式）
   const countsLine = lines[3];
   const nAtoms = parseInt(countsLine.slice(0, 3).trim(), 10);
   const nBonds = parseInt(countsLine.slice(3, 6).trim(), 10);
@@ -1145,14 +1177,12 @@ function setupRotatableBonds(sdfText) {
   base3DBonds = parsed.parsedBonds;
   rotatableBonds = [];
 
-  // 找出所有「非環狀單鍵」，且兩端都還有連接其他原子（例如乙烷的 C1-C2 鍵）
   base3DBonds.forEach((b) => {
     if (b.order !== 1) return;
     const deg1 = base3DBonds.filter((x) => x.a1 === b.a1 || x.a2 === b.a1).length;
     const deg2 = base3DBonds.filter((x) => x.a1 === b.a2 || x.a2 === b.a2).length;
-    if (deg1 < 2 || deg2 < 2) return; // 略過末端 H 鍵
+    if (deg1 < 2 || deg2 < 2) return;
 
-    // 測試切斷此鍵後，是否能分成兩個獨立部分（排除環內單鍵）
     const groupB = getSubtreeAtoms(b.a2, b.a1);
     if (!groupB.has(b.a1)) {
       const atomA = base3DAtoms[b.a1];
@@ -1171,7 +1201,6 @@ function setupRotatableBonds(sdfText) {
     return;
   }
 
-  // 填入下拉選單並重置滑桿
   select.innerHTML = "";
   rotatableBonds.forEach((rb, i) => {
     const opt = document.createElement("option");
@@ -1202,74 +1231,6 @@ function getSubtreeAtoms(startIdx, blockedIdx) {
   return visited;
 }
 
-// 監聽滑桿拉動，即時計算 3D 軸向旋轉座標
-document.getElementById("torsionSlider").addEventListener("input", (e) => {
-  const deg = Number(e.target.value);
-  document.getElementById("torsionAngleLabel").textContent = `${deg}°`;
-
-  // 判斷目前旋轉角度接近 Staggered 或 Eclipsed（以初始 Staggered 為 0° 基準）
-  const mod120 = deg % 120;
-  const statusEl = document.getElementById("torsionStatus");
-  if (mod120 <= 8 || mod120 >= 112) {
-    statusEl.textContent = "✦ 交錯式 (Staggered · 能量最低)";
-    statusEl.style.color = "#38bdf8";
-  } else if (Math.abs(mod120 - 60) <= 8) {
-    statusEl.textContent = "⚡ 重疊式 (Eclipsed · 能量最高)";
-    statusEl.style.color = "#fbbf24";
-  } else {
-    statusEl.textContent = "過渡扭轉角 (Skew)";
-    statusEl.style.color = "#94a3b8";
-  }
-
-  const bondIdx = Number(document.getElementById("bondSelect").value);
-  const targetBond = rotatableBonds[bondIdx];
-  if (!targetBond) return;
-
-  const pA = base3DAtoms[targetBond.a1];
-  const pB = base3DAtoms[targetBond.a2];
-
-  // 計算單位旋轉軸向量 u = (pB - pA) / |pB - pA|
-  let ux = pB.x - pA.x;
-  let uy = pB.y - pA.y;
-  let uz = pB.z - pA.z;
-  const len = Math.hypot(ux, uy, uz) || 1;
-  ux /= len; uy /= len; uz /= len;
-
-  const rad = (deg * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-
-  // 複製原始原子座標並對 movingIndices 套用 Rodrigues 3D 旋轉
-  const rotatedAtoms = base3DAtoms.map((a) => ({ ...a }));
-  targetBond.movingIndices.forEach((idx) => {
-    if (idx === targetBond.a2) return; // 軸心原子本身不動
-    const atom = rotatedAtoms[idx];
-    const vx = atom.x - pB.x;
-    const vy = atom.y - pB.y;
-    const vz = atom.z - pB.z;
-
-    const dot = ux * vx + uy * vy + uz * vz;
-    const crossX = uy * vz - uz * vy;
-    const crossY = uz * vx - ux * vz;
-    const crossZ = ux * vy - uy * vx;
-
-    atom.x = pB.x + vx * cos + crossX * sin + ux * dot * (1 - cos);
-    atom.y = pB.y + vy * cos + crossY * sin + uy * dot * (1 - cos);
-    atom.z = pB.z + vz * cos + crossZ * sin + uz * dot * (1 - cos);
-  });
-
-  // 重新組裝 SDF 並更新 3Dmol 畫面（保留當前相機視角不重置）
-  const newSdf = buildSdfFromAtoms(rotatedAtoms, base3DBonds);
-  viewer3D.clear();
-  viewer3D.addModel(newSdf, "sdf");
-  apply3DStyle(document.getElementById("styleSelect").value);
-});
-
-document.getElementById("bondSelect").addEventListener("change", () => {
-  document.getElementById("torsionSlider").value = 0;
-  document.getElementById("torsionAngleLabel").textContent = "0°";
-});
-
 function buildSdfFromAtoms(atomList, bondList) {
   const lines = [
     "MolView",
@@ -1295,7 +1256,7 @@ function render3DModel(molData) {
   apply3DStyle(document.getElementById("styleSelect").value);
   viewer3D.zoomTo();
   viewer3D.render();
-  setupRotatableBonds(molData); // 自動偵測可旋轉單鍵並顯示滑桿
+  setupRotatableBonds(molData);
 }
 
 function apply3DStyle(styleType) {
@@ -1310,7 +1271,6 @@ function apply3DStyle(styleType) {
   viewer3D.render();
 }
 
-// 深度優先搜尋 (DFS) 找出畫布上的第一個六員環（依環繞順序排列）
 function findSixMemberedRing() {
   const adj = new Map();
   atoms.forEach((a) => adj.set(a.id, []));
@@ -1343,7 +1303,6 @@ function findSixMemberedRing() {
   return null;
 }
 
-// 移動附著在環上的取代基原子，保持鍵長不變形
 function moveSubstituents(rootId, movedSet, dx, dy) {
   const queue = [rootId];
   while (queue.length > 0) {
