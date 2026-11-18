@@ -1137,15 +1137,14 @@ function findSixMemberedRing() {
 }
 
 // 移動附著在環上的取代基原子，保持鍵長不變形
-function moveSubstituents(rootId, ringIdSet, dx, dy) {
-  const visited = new Set([...ringIdSet, rootId]);
+function moveSubstituents(rootId, movedSet, dx, dy) {
   const queue = [rootId];
   while (queue.length > 0) {
     const curr = queue.shift();
     bonds.forEach((b) => {
       const neighbor = b.a1 === curr ? b.a2 : b.a2 === curr ? b.a1 : null;
-      if (neighbor && !visited.has(neighbor)) {
-        visited.add(neighbor);
+      if (neighbor && !movedSet.has(neighbor)) {
+        movedSet.add(neighbor);
         const atomObj = atoms.find((a) => a.id === neighbor);
         if (atomObj) {
           atomObj.x += dx;
