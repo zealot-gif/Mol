@@ -61,7 +61,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
   processMolecule(defaultSmiles, false);
-  setTimeout(() => loadSmilesTo2D(defaultSmiles), 100);
+  setTimeout(() => loadSmilesTo2D(defaultSmiles), 150);
 });
 
 function buildPeriodicTable() {
@@ -110,7 +110,6 @@ function loadSmilesTo2D(smiles) {
     if (typeof OCL === "undefined") return;
     let mol = null;
 
-    // 1. 優先嘗試解析 SMILES（若含立體斜線解析失敗，自動去除斜線重試）
     try {
       mol = OCL.Molecule.fromSmiles(smiles);
     } catch (e1) {
@@ -126,7 +125,6 @@ function loadSmilesTo2D(smiles) {
 
     if (!mol) return;
 
-    // 強制計算標準 2D 平面座標，確保不會因為缺乏座標而變成空白
     mol.inventCoordinates();
     mol.ensureHelperArrays(7);
     const nAtoms = mol.getAllAtoms();
@@ -579,7 +577,7 @@ window.addEventListener("mouseup", (e) => {
   draw();
 });
 
-// === 手機觸控支援（單指繪圖 + 雙指旋轉與縮放） ===
+// === 手機觸控支援 ===
 canvas.addEventListener("touchstart", (e) => {
   e.preventDefault();
   if (e.touches.length === 2) {
@@ -935,6 +933,82 @@ function bindUIEvents() {
     }
   });
 
+  document.getElementById("styleSelect").addEventListener("change", (e) => {
+    apply3DStyle(e.target.value);
+  });
+
+  document.getElementById("exportBtn").addEventListener("click", () => {
+    if (!currentSdfData) return;
+    const blob = new Blob([currentSdfData], { type: "chemical/x-mdl-sdfile" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "molecule_3d.sdf";
+    a.click();
+  });
+
+  document.getElementById("torsionSlider").addEventListener("input", (e) => {
+    const deg = Number(e.target.value);
+    document.getElementById("torsionAngleLabel").textContent = `${deg}°`;
+
+    const mod120 = deg % 120;
+    const statusEl = document.getElementById("torsionStatus");
+    if (mod120 <= 8 || mod120 >= 112) {
+      statusEl.textContent = "✦ 交錯式 (Staggered · 能量最低)";
+      statusEl.style.color = "#38bdf8";
+    } else if (Math.abs(mod120 - 60) <= 8) {
+      statusEl.textContent = "⚡ 重疊式 (Eclipsed · 能量最高)";
+      statusEl.style.color = "#fbbf24";
+    } else {
+      statusEl.textContent = "過渡扭轉角 (Skew)";
+      statusEl.style.color = "#94a3b8";
+    }
+
+    const bondIdx = Number(document.getElementById("bondSelect").value);
+    const targetBond = rotatableBonds[bondIdx];
+    if (!targetBond) return;
+
+    const pA = base3DAtoms[targetBond.a1];
+    const pB = base3DAtoms[targetBond.a2];
+
+    let ux = pB.x - pA.x;
+    let uy = pB.y - pA.y;
+    let uz = pB.z - pA.z;
+    const len = Math.hypot(ux, uy, uz) || 1;
+    ux /= len; uy /= len; uz /= len;
+
+    const rad = (deg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+
+    const rotatedAtoms = base3DAtoms.map((a) => ({ ...a }));
+    targetBond.movingIndices.forEach((idx) => {
+      if (idx === targetBond.a2) return;
+      const atom = rotatedAtoms[idx];
+      const vx = atom.x - pB.x;
+      const vy = atom.y - pB.y;
+      const vz = atom.z - pB.z;
+
+      const dot = ux * vx + uy * vy + uz * vz;
+      const crossX = uy * vz - uz * vy;
+      const crossY = uz * vx - ux * vz;
+      const crossZ = ux * vy - uy * vx;
+
+      atom.x = pB.x + vx * cos + crossX * sin + ux * dot * (1 - cos);
+      atom.y = pB.y + vy * cos + crossY * sin + uy * dot * (1 - cos);
+      atom.z = pB.z + vz * cos + crossZ * sin + uz * dot * (1 - cos);
+    });
+
+    const newSdf = buildSdfFromAtoms(rotatedAtoms, base3DBonds);
+    viewer3D.clear();
+    viewer3D.addModel(newSdf, "sdf");
+    apply3DStyle(document.getElementById("styleSelect").value);
+  });
+
+  document.getElementById("bondSelect").addEventListener("change", () => {
+    document.getElementById("torsionSlider").value = 0;
+    document.getElementById("torsionAngleLabel").textContent = "0°";
+  });
+
   // === 搜尋框即時推薦引擎 ===
   const COMMON_MOLECULES = [
     { zh: "乙烷 (Staggered / Eclipsed)", en: "ethane", formula: "C2H6", tag: "烷烴" },
@@ -1090,3 +1164,359 @@ function bindUIEvents() {
       processMolecule(val, !isSmiles);
     }
   });
+}
+
+function init3DViewer() {
+  viewer3D = $3Dmol.createViewer("viewer_3d", { backgroundColor: "#0f172a" });
+}
+
+async function processMolecule(query, isName = false) {
+  const infoEl = document.getElementById("molInfo");
+  const badgeEl = document.getElementById("sourceBadge");
+  const formulaEl = document.getElementById("molFormula");
+
+  let searchQuery = query;
+
+  if (isName && /[\u4e00-\u9fa5]/.test(query)) {
+    infoEl.textContent = `正在將「${query}」翻譯為英文化學名...`;
+    const specialDict = {
+      "阿斯匹靈": "aspirin", "阿司匹林": "aspirin", "青黴素": "penicillin",
+      "盤尼西林": "penicillin", "布洛芬": "ibuprofen", "對乙醯氨基酚": "acetaminophen",
+      "普拿疼": "acetaminophen", "乙醇": "ethanol", "酒精": "ethanol",
+      "乙酸": "acetic acid", "醋酸": "acetic acid", "丙酮": "acetone"
+    };
+
+    if (specialDict[query]) {
+      searchQuery = specialDict[query];
+    } else {
+      try {
+        const transRes = await fetch(
+          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(query)}&langpair=zh-TW|en`
+        );
+        const transData = await transRes.json();
+        if (transData?.responseData?.translatedText) {
+          searchQuery = transData.responseData.translatedText.toLowerCase().trim();
+        }
+      } catch (e) {
+        console.warn("自動翻譯連線失敗:", e);
+      }
+    }
+  }
+
+  infoEl.textContent = `正在向資料庫檢索「${searchQuery}」...`;
+
+  try {
+    const type = isName ? "name" : "smiles";
+    const encoded = encodeURIComponent(searchQuery);
+
+    const propRes = await fetch(
+      `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${type}/${encoded}/property/MolecularFormula,MolecularWeight,IUPACName,IsomericSMILES,CanonicalSMILES,ConnectivitySMILES/JSON`
+    );
+
+    if (propRes.ok) {
+      const propData = await propRes.json();
+      const props = propData.PropertyTable.Properties[0];
+      const exactSmiles = props.IsomericSMILES || props.CanonicalSMILES || props.ConnectivitySMILES || props.SMILES;
+
+      const sdfTarget = exactSmiles ? `smiles/${encodeURIComponent(exactSmiles)}` : `${type}/${encoded}`;
+      const sdfRes = await fetch(
+        `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${sdfTarget}/SDF?record_type=3d`
+      );
+
+      badgeEl.className = "badge cloud";
+      badgeEl.textContent = "☁ PubChem";
+      formulaEl.textContent = `${props.MolecularFormula} (${props.MolecularWeight})`;
+      infoEl.textContent = `${searchQuery} ｜ ${props.IUPACName || ""}`;
+
+      if (sdfRes.ok) {
+        currentSdfData = await sdfRes.text();
+        render3DModel(currentSdfData);
+      } else if (exactSmiles) {
+        generateLocal3D(exactSmiles);
+      }
+
+      if (isName && exactSmiles) {
+        loadSmilesTo2D(exactSmiles);
+      }
+      return;
+    }
+
+    if (!isName) {
+      generateLocal3D(searchQuery);
+    } else {
+      throw new Error(`資料庫找不到「${searchQuery}」（請嘗試輸入英文名或 SMILES）`);
+    }
+  } catch (err) {
+    if (!isName) {
+      generateLocal3D(searchQuery);
+    } else {
+      badgeEl.className = "badge local";
+      badgeEl.textContent = "提示";
+      formulaEl.textContent = "—";
+      infoEl.textContent = err.message;
+    }
+  }
+}
+
+function generateLocal3D(smiles) {
+  const infoEl = document.getElementById("molInfo");
+  const badgeEl = document.getElementById("sourceBadge");
+  const formulaEl = document.getElementById("molFormula");
+
+  try {
+    const mol = OCL.Molecule.fromSmiles(smiles);
+    mol.addImplicitHydrogens();
+
+    const generator = new OCL.ConformerGenerator(1);
+    const mol3D = generator.getOneConformerAsMolecule(mol);
+    if (!mol3D) throw new Error("無法生成 3D 座標");
+
+    currentSdfData = mol3D.toMolfileV3();
+    const formulaObj = mol.getMolecularFormula();
+
+    badgeEl.className = "badge local";
+    badgeEl.textContent = "⚡ 本地演算";
+    formulaEl.textContent = `${formulaObj.formula} (${formulaObj.relativeWeight.toFixed(2)})`;
+    infoEl.textContent = `SMILES: ${smiles}`;
+
+    render3DModel(currentSdfData);
+  } catch (localErr) {
+    badgeEl.className = "badge local";
+    badgeEl.textContent = "錯誤";
+    formulaEl.textContent = "—";
+    infoEl.textContent = localErr.message;
+  }
+}
+
+function parseSdfForRotation(sdfText) {
+  const lines = sdfText.split(/\r?\n/);
+  if (lines.length < 4) return null;
+
+  const countsLine = lines[3];
+
+  if (countsLine.includes("V3000")) {
+    const parsedAtoms = [];
+    const parsedBonds = [];
+    let inAtomBlock = false;
+    let inBondBlock = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed === "M  V30 BEGIN ATOM") { inAtomBlock = true; continue; }
+      if (trimmed === "M  V30 END ATOM") { inAtomBlock = false; continue; }
+      if (trimmed === "M  V30 BEGIN BOND") { inBondBlock = true; continue; }
+      if (trimmed === "M  V30 END BOND") { inBondBlock = false; continue; }
+
+      if (inAtomBlock && trimmed.startsWith("M  V30 ")) {
+        const parts = trimmed.slice(7).trim().split(/\s+/);
+        parsedAtoms.push({
+          idx: parseInt(parts[0], 10) - 1,
+          el: parts[1],
+          x: parseFloat(parts[2]),
+          y: parseFloat(parts[3]),
+          z: parseFloat(parts[4])
+        });
+      } else if (inBondBlock && trimmed.startsWith("M  V30 ")) {
+        const parts = trimmed.slice(7).trim().split(/\s+/);
+        parsedBonds.push({
+          order: parseInt(parts[1], 10),
+          a1: parseInt(parts[2], 10) - 1,
+          a2: parseInt(parts[3], 10) - 1
+        });
+      }
+    }
+    return parsedAtoms.length > 0 ? { parsedAtoms, parsedBonds } : null;
+  }
+
+  const nAtoms = parseInt(countsLine.slice(0, 3).trim(), 10);
+  const nBonds = parseInt(countsLine.slice(3, 6).trim(), 10);
+  if (isNaN(nAtoms) || isNaN(nBonds)) return null;
+
+  const parsedAtoms = [];
+  for (let i = 0; i < nAtoms; i++) {
+    const l = lines[4 + i];
+    if (!l) continue;
+    parsedAtoms.push({
+      idx: i,
+      x: parseFloat(l.slice(0, 10)),
+      y: parseFloat(l.slice(10, 20)),
+      z: parseFloat(l.slice(20, 30)),
+      el: l.slice(31, 34).trim()
+    });
+  }
+
+  const parsedBonds = [];
+  for (let i = 0; i < nBonds; i++) {
+    const l = lines[4 + nAtoms + i];
+    if (!l) continue;
+    parsedBonds.push({
+      a1: parseInt(l.slice(0, 3).trim(), 10) - 1,
+      a2: parseInt(l.slice(3, 6).trim(), 10) - 1,
+      order: parseInt(l.slice(6, 9).trim(), 10)
+    });
+  }
+
+  return { parsedAtoms, parsedBonds };
+}
+
+function setupRotatableBonds(sdfText) {
+  const box = document.getElementById("torsionBox");
+  const select = document.getElementById("bondSelect");
+  const slider = document.getElementById("torsionSlider");
+  const angleLabel = document.getElementById("torsionAngleLabel");
+  const statusEl = document.getElementById("torsionStatus");
+
+  const parsed = parseSdfForRotation(sdfText);
+  if (!parsed) {
+    box.style.display = "none";
+    return;
+  }
+
+  base3DAtoms = parsed.parsedAtoms;
+  base3DBonds = parsed.parsedBonds;
+  rotatableBonds = [];
+
+  base3DBonds.forEach((b) => {
+    if (b.order !== 1) return;
+    const deg1 = base3DBonds.filter((x) => x.a1 === b.a1 || x.a2 === b.a1).length;
+    const deg2 = base3DBonds.filter((x) => x.a1 === b.a2 || x.a2 === b.a2).length;
+    if (deg1 < 2 || deg2 < 2) return;
+
+    const groupB = getSubtreeAtoms(b.a2, b.a1);
+    if (!groupB.has(b.a1)) {
+      const atomA = base3DAtoms[b.a1];
+      const atomB = base3DAtoms[b.a2];
+      rotatableBonds.push({
+        a1: b.a1,
+        a2: b.a2,
+        label: `${atomA.el}${b.a1 + 1} - ${atomB.el}${b.a2 + 1}`,
+        movingIndices: Array.from(groupB)
+      });
+    }
+  });
+
+  if (rotatableBonds.length === 0) {
+    box.style.display = "none";
+    return;
+  }
+
+  select.innerHTML = "";
+  rotatableBonds.forEach((rb, i) => {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = `軸: ${rb.label}`;
+    select.appendChild(opt);
+  });
+
+  slider.value = 0;
+  angleLabel.textContent = "0°";
+  statusEl.textContent = "初始能量最低構象 (Staggered)";
+  box.style.display = "block";
+}
+
+function getSubtreeAtoms(startIdx, blockedIdx) {
+  const visited = new Set([startIdx]);
+  const queue = [startIdx];
+  while (queue.length > 0) {
+    const curr = queue.shift();
+    base3DBonds.forEach((b) => {
+      const next = b.a1 === curr ? b.a2 : b.a2 === curr ? b.a1 : null;
+      if (next !== null && next !== blockedIdx && !visited.has(next)) {
+        visited.add(next);
+        queue.push(next);
+      }
+    });
+  }
+  return visited;
+}
+
+function buildSdfFromAtoms(atomList, bondList) {
+  const lines = [
+    "MolView",
+    "  Torsion3D",
+    "",
+    `${String(atomList.length).padStart(3)}${String(bondList.length).padStart(3)}  0  0  0  0  0  0  0  0999 V2000`
+  ];
+  atomList.forEach((a) => {
+    lines.push(
+      `${a.x.toFixed(4).padStart(10)}${a.y.toFixed(4).padStart(10)}${a.z.toFixed(4).padStart(10)} ${a.el.padEnd(3)} 0  0  0  0  0  0  0  0  0  0  0  0`
+    );
+  });
+  bondList.forEach((b) => {
+    lines.push(`${String(b.a1 + 1).padStart(3)}${String(b.a2 + 1).padStart(3)}${String(b.order).padStart(3)}  0  0  0  0`);
+  });
+  lines.push("M  END");
+  return lines.join("\n");
+}
+
+function render3DModel(molData) {
+  viewer3D.clear();
+  viewer3D.addModel(molData, "sdf");
+  apply3DStyle(document.getElementById("styleSelect").value);
+  viewer3D.zoomTo();
+  viewer3D.render();
+  setupRotatableBonds(molData);
+}
+
+function apply3DStyle(styleType) {
+  if (!viewer3D) return;
+  if (styleType === "stick") {
+    viewer3D.setStyle({}, { stick: { radius: 0.16 }, sphere: { scale: 0.26 } });
+  } else if (styleType === "sphere") {
+    viewer3D.setStyle({}, { sphere: {} });
+  } else if (styleType === "line") {
+    viewer3D.setStyle({}, { line: { linewidth: 2 } });
+  }
+  viewer3D.render();
+}
+
+function findSixMemberedRing() {
+  const adj = new Map();
+  atoms.forEach((a) => adj.set(a.id, []));
+  bonds.forEach((b) => {
+    if (adj.has(b.a1) && adj.has(b.a2)) {
+      adj.get(b.a1).push(b.a2);
+      adj.get(b.a2).push(b.a1);
+    }
+  });
+
+  function dfs(startId, currId, path) {
+    if (path.length === 6) {
+      return adj.get(currId).includes(startId) ? path : null;
+    }
+    for (const nextId of adj.get(currId)) {
+      if (!path.includes(nextId)) {
+        const res = dfs(startId, nextId, [...path, nextId]);
+        if (res) return res;
+      }
+    }
+    return null;
+  }
+
+  for (const a of atoms) {
+    const cycleIds = dfs(a.id, a.id, [a.id]);
+    if (cycleIds) {
+      return cycleIds.map((id) => atoms.find((atom) => atom.id === id));
+    }
+  }
+  return null;
+}
+
+function moveSubstituents(rootId, movedSet, dx, dy) {
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const curr = queue.shift();
+    bonds.forEach((b) => {
+      const neighbor = b.a1 === curr ? b.a2 : b.a2 === curr ? b.a1 : null;
+      if (neighbor && !movedSet.has(neighbor)) {
+        movedSet.add(neighbor);
+        const atomObj = atoms.find((a) => a.id === neighbor);
+        if (atomObj) {
+          atomObj.x += dx;
+          atomObj.y += dy;
+        }
+        queue.push(neighbor);
+      }
+    });
+  }
+}
