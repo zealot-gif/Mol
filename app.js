@@ -922,28 +922,46 @@ function bindUIEvents() {
   });
 
   document.getElementById("syncBtn").addEventListener("click", () => {
+    if (atoms.length === 0) {
+      alert("畫布目前是空的，請先繪製分子結構！");
+      return;
+    }
+
     const molfile = exportCanvasToMolfile();
     if (!molfile) return;
+
+    const infoEl = document.getElementById("molInfo");
+    const badgeEl = document.getElementById("sourceBadge");
+    const formulaEl = document.getElementById("molFormula");
+
     try {
       const oclMol = OCL.Molecule.fromMolfile(molfile);
+      oclMol.ensureHelperArrays(7);
       const smiles = oclMol.toSmiles();
-      if (smiles) processMolecule(smiles, false);
+      const formulaObj = oclMol.getMolecularFormula();
+
+      // 1. 立即在本地端生成 3D 構象（不卡網路、支援任何自創手繪結構）
+      const molFor3D = oclMol.getCompactCopy();
+      molFor3D.addImplicitHydrogens();
+
+      const generator = new OCL.ConformerGenerator(1);
+      const mol3D = generator.getOneConformerAsMolecule(molFor3D);
+
+      if (mol3D) {
+        currentSdfData = mol3D.toMolfileV3();
+        badgeEl.className = "badge local";
+        badgeEl.textContent = "⚡ 本地 3D 轉換";
+        formulaEl.textContent = `${formulaObj.formula} (${formulaObj.relativeWeight.toFixed(2)})`;
+        infoEl.textContent = `自繪結構 ｜ SMILES: ${smiles}`;
+        render3DModel(currentSdfData);
+      } else if (smiles) {
+        // 若本地構象生成器無法處理特殊多環，自動退回雲端檢索
+        processMolecule(smiles, false);
+      }
     } catch (err) {
-      alert("請確認畫布上的化學結構連線完整");
+      console.error("2D 轉 3D 失敗:", err);
+      alert("無法轉換此結構為 3D，請檢查是否有未連接或重疊的化學鍵");
     }
-  });
-
-  document.getElementById("styleSelect").addEventListener("change", (e) => {
-    apply3DStyle(e.target.value);
-  });
-
-  document.getElementById("exportBtn").addEventListener("click", () => {
-    if (!currentSdfData) return;
-    const blob = new Blob([currentSdfData], { type: "chemical/x-mdl-sdfile" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "molecule_3d.sdf";
-    a.click();
   });
 
   document.getElementById("torsionSlider").addEventListener("input", (e) => {
