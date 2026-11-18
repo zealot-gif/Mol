@@ -1083,12 +1083,216 @@ function generateLocal3D(smiles) {
   }
 }
 
+// === 3D 單鍵旋轉 (Staggered / Eclipsed 構象觀察器) ===
+let base3DAtoms = []; // 儲存原始 3D 座標
+let base3DBonds = []; // 儲存所有鍵結
+let rotatableBonds = []; // 儲存可旋轉單鍵
+
+function parseSdfForRotation(sdfText) {
+  const lines = sdfText.split(/\r?\n/);
+  if (lines.length < 4) return null;
+
+  // 支援 V2000 格式解析（PubChem 與本地標準格式）
+  const countsLine = lines[3];
+  const nAtoms = parseInt(countsLine.slice(0, 3).trim(), 10);
+  const nBonds = parseInt(countsLine.slice(3, 6).trim(), 10);
+  if (isNaN(nAtoms) || isNaN(nBonds) || countsLine.includes("V3000")) return null;
+
+  const parsedAtoms = [];
+  for (let i = 0; i < nAtoms; i++) {
+    const l = lines[4 + i];
+    if (!l) continue;
+    parsedAtoms.push({
+      idx: i,
+      x: parseFloat(l.slice(0, 10)),
+      y: parseFloat(l.slice(10, 20)),
+      z: parseFloat(l.slice(20, 30)),
+      el: l.slice(31, 34).trim()
+    });
+  }
+
+  const parsedBonds = [];
+  for (let i = 0; i < nBonds; i++) {
+    const l = lines[4 + nAtoms + i];
+    if (!l) continue;
+    parsedBonds.push({
+      a1: parseInt(l.slice(0, 3).trim(), 10) - 1,
+      a2: parseInt(l.slice(3, 6).trim(), 10) - 1,
+      order: parseInt(l.slice(6, 9).trim(), 10)
+    });
+  }
+
+  return { parsedAtoms, parsedBonds };
+}
+
+function setupRotatableBonds(sdfText) {
+  const box = document.getElementById("torsionBox");
+  const select = document.getElementById("bondSelect");
+  const slider = document.getElementById("torsionSlider");
+  const angleLabel = document.getElementById("torsionAngleLabel");
+  const statusEl = document.getElementById("torsionStatus");
+
+  const parsed = parseSdfForRotation(sdfText);
+  if (!parsed) {
+    box.style.display = "none";
+    return;
+  }
+
+  base3DAtoms = parsed.parsedAtoms;
+  base3DBonds = parsed.parsedBonds;
+  rotatableBonds = [];
+
+  // 找出所有「非環狀單鍵」，且兩端都還有連接其他原子（例如乙烷的 C1-C2 鍵）
+  base3DBonds.forEach((b) => {
+    if (b.order !== 1) return;
+    const deg1 = base3DBonds.filter((x) => x.a1 === b.a1 || x.a2 === b.a1).length;
+    const deg2 = base3DBonds.filter((x) => x.a1 === b.a2 || x.a2 === b.a2).length;
+    if (deg1 < 2 || deg2 < 2) return; // 略過末端 H 鍵
+
+    // 測試切斷此鍵後，是否能分成兩個獨立部分（排除環內單鍵）
+    const groupB = getSubtreeAtoms(b.a2, b.a1);
+    if (!groupB.has(b.a1)) {
+      const atomA = base3DAtoms[b.a1];
+      const atomB = base3DAtoms[b.a2];
+      rotatableBonds.push({
+        a1: b.a1,
+        a2: b.a2,
+        label: `${atomA.el}${b.a1 + 1} - ${atomB.el}${b.a2 + 1}`,
+        movingIndices: Array.from(groupB)
+      });
+    }
+  });
+
+  if (rotatableBonds.length === 0) {
+    box.style.display = "none";
+    return;
+  }
+
+  // 填入下拉選單並重置滑桿
+  select.innerHTML = "";
+  rotatableBonds.forEach((rb, i) => {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = `軸: ${rb.label}`;
+    select.appendChild(opt);
+  });
+
+  slider.value = 0;
+  angleLabel.textContent = "0°";
+  statusEl.textContent = "初始能量最低構象 (Staggered)";
+  box.style.display = "block";
+}
+
+function getSubtreeAtoms(startIdx, blockedIdx) {
+  const visited = new Set([startIdx]);
+  const queue = [startIdx];
+  while (queue.length > 0) {
+    const curr = queue.shift();
+    base3DBonds.forEach((b) => {
+      const next = b.a1 === curr ? b.a2 : b.a2 === curr ? b.a1 : null;
+      if (next !== null && next !== blockedIdx && !visited.has(next)) {
+        visited.add(next);
+        queue.push(next);
+      }
+    });
+  }
+  return visited;
+}
+
+// 監聽滑桿拉動，即時計算 3D 軸向旋轉座標
+document.getElementById("torsionSlider").addEventListener("input", (e) => {
+  const deg = Number(e.target.value);
+  document.getElementById("torsionAngleLabel").textContent = `${deg}°`;
+
+  // 判斷目前旋轉角度接近 Staggered 或 Eclipsed（以初始 Staggered 為 0° 基準）
+  const mod120 = deg % 120;
+  const statusEl = document.getElementById("torsionStatus");
+  if (mod120 <= 8 || mod120 >= 112) {
+    statusEl.textContent = "✦ 交錯式 (Staggered · 能量最低)";
+    statusEl.style.color = "#38bdf8";
+  } else if (Math.abs(mod120 - 60) <= 8) {
+    statusEl.textContent = "⚡ 重疊式 (Eclipsed · 能量最高)";
+    statusEl.style.color = "#fbbf24";
+  } else {
+    statusEl.textContent = "過渡扭轉角 (Skew)";
+    statusEl.style.color = "#94a3b8";
+  }
+
+  const bondIdx = Number(document.getElementById("bondSelect").value);
+  const targetBond = rotatableBonds[bondIdx];
+  if (!targetBond) return;
+
+  const pA = base3DAtoms[targetBond.a1];
+  const pB = base3DAtoms[targetBond.a2];
+
+  // 計算單位旋轉軸向量 u = (pB - pA) / |pB - pA|
+  let ux = pB.x - pA.x;
+  let uy = pB.y - pA.y;
+  let uz = pB.z - pA.z;
+  const len = Math.hypot(ux, uy, uz) || 1;
+  ux /= len; uy /= len; uz /= len;
+
+  const rad = (deg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+
+  // 複製原始原子座標並對 movingIndices 套用 Rodrigues 3D 旋轉
+  const rotatedAtoms = base3DAtoms.map((a) => ({ ...a }));
+  targetBond.movingIndices.forEach((idx) => {
+    if (idx === targetBond.a2) return; // 軸心原子本身不動
+    const atom = rotatedAtoms[idx];
+    const vx = atom.x - pB.x;
+    const vy = atom.y - pB.y;
+    const vz = atom.z - pB.z;
+
+    const dot = ux * vx + uy * vy + uz * vz;
+    const crossX = uy * vz - uz * vy;
+    const crossY = uz * vx - ux * vz;
+    const crossZ = ux * vy - uy * vx;
+
+    atom.x = pB.x + vx * cos + crossX * sin + ux * dot * (1 - cos);
+    atom.y = pB.y + vy * cos + crossY * sin + uy * dot * (1 - cos);
+    atom.z = pB.z + vz * cos + crossZ * sin + uz * dot * (1 - cos);
+  });
+
+  // 重新組裝 SDF 並更新 3Dmol 畫面（保留當前相機視角不重置）
+  const newSdf = buildSdfFromAtoms(rotatedAtoms, base3DBonds);
+  viewer3D.clear();
+  viewer3D.addModel(newSdf, "sdf");
+  apply3DStyle(document.getElementById("styleSelect").value);
+});
+
+document.getElementById("bondSelect").addEventListener("change", () => {
+  document.getElementById("torsionSlider").value = 0;
+  document.getElementById("torsionAngleLabel").textContent = "0°";
+});
+
+function buildSdfFromAtoms(atomList, bondList) {
+  const lines = [
+    "MolView",
+    "  Torsion3D",
+    "",
+    `${String(atomList.length).padStart(3)}${String(bondList.length).padStart(3)}  0  0  0  0  0  0  0  0999 V2000`
+  ];
+  atomList.forEach((a) => {
+    lines.push(
+      `${a.x.toFixed(4).padStart(10)}${a.y.toFixed(4).padStart(10)}${a.z.toFixed(4).padStart(10)} ${a.el.padEnd(3)} 0  0  0  0  0  0  0  0  0  0  0  0`
+    );
+  });
+  bondList.forEach((b) => {
+    lines.push(`${String(b.a1 + 1).padStart(3)}${String(b.a2 + 1).padStart(3)}${String(b.order).padStart(3)}  0  0  0  0`);
+  });
+  lines.push("M  END");
+  return lines.join("\n");
+}
+
 function render3DModel(molData) {
   viewer3D.clear();
   viewer3D.addModel(molData, "sdf");
   apply3DStyle(document.getElementById("styleSelect").value);
   viewer3D.zoomTo();
   viewer3D.render();
+  setupRotatableBonds(molData); // 自動偵測可旋轉單鍵並顯示滑桿
 }
 
 function apply3DStyle(styleType) {
