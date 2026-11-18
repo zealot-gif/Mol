@@ -108,7 +108,26 @@ function saveState() {
 function loadSmilesTo2D(smiles) {
   try {
     if (typeof OCL === "undefined") return;
-    const mol = OCL.Molecule.fromSmiles(smiles);
+    let mol = null;
+
+    // 1. 優先嘗試解析 SMILES（若含立體斜線解析失敗，自動去除斜線重試）
+    try {
+      mol = OCL.Molecule.fromSmiles(smiles);
+    } catch (e1) {
+      try {
+        mol = OCL.Molecule.fromSmiles(smiles.replace(/[\/\\]/g, ""));
+      } catch (e2) {
+        if (currentSdfData) {
+          mol = OCL.Molecule.fromMolfile(currentSdfData);
+          mol.deleteImplicitHydrogens();
+        }
+      }
+    }
+
+    if (!mol) return;
+
+    // 強制計算標準 2D 平面座標，確保不會因為缺乏座標而變成空白
+    mol.inventCoordinates();
     mol.ensureHelperArrays(7);
     const nAtoms = mol.getAllAtoms();
     const nBonds = mol.getAllBonds();
