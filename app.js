@@ -1005,34 +1005,38 @@ async function processMolecule(query, isName = false) {
     const type = isName ? "name" : "smiles";
     const encoded = encodeURIComponent(searchQuery);
 
-    const sdfRes = await fetch(
-      `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${type}/${encoded}/SDF?record_type=3d`
+    // 1. 先抓取完整屬性（特別是包含順反 E/Z 與 R/S 立體組態的 IsomericSMILES）
+    const propRes = await fetch(
+      `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${type}/${encoded}/property/MolecularFormula,MolecularWeight,IUPACName,IsomericSMILES,CanonicalSMILES/JSON`
     );
 
-    if (sdfRes.ok) {
-      currentSdfData = await sdfRes.text();
-      const propRes = await fetch(
-        `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${type}/${encoded}/property/MolecularFormula,MolecularWeight,IUPACName,CanonicalSMILES/JSON`
-      );
+    if (propRes.ok) {
       const propData = await propRes.json();
       const props = propData.PropertyTable.Properties[0];
+      const exactSmiles = props.IsomericSMILES || props.CanonicalSMILES || props.SMILES;
+
+      // 2. 優先用「精準立體 IsomericSMILES」向 PubChem 請求正確異構物的 3D 結構
+      const sdfTarget = exactSmiles ? `smiles/${encodeURIComponent(exactSmiles)}` : `${type}/${encoded}`;
+      const sdfRes = await fetch(
+        `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${sdfTarget}/SDF?record_type=3d`
+      );
 
       badgeEl.className = "badge cloud";
       badgeEl.textContent = "☁ PubChem";
       formulaEl.textContent = `${props.MolecularFormula} (${props.MolecularWeight})`;
       infoEl.textContent = `${searchQuery} ｜ ${props.IUPACName || ""}`;
 
-      // 同步繪製左側 2D 畫布（相容 PubChem 所有 SMILES 欄位或直接由 3D 結構轉換）
-      if (isName) {
-        const smilesStr = props.CanonicalSMILES || props.ConnectivitySMILES || props.SMILES;
-        if (smilesStr) {
-          loadSmilesTo2D(smilesStr);
-        } else if (typeof OCL !== "undefined") {
-          const fallbackMol = OCL.Molecule.fromMolfile(currentSdfData);
-          loadSmilesTo2D(fallbackMol.toSmiles());
-        }
+      if (isName && exactSmiles) {
+        loadSmilesTo2D(exactSmiles);
       }
-      render3DModel(currentSdfData);
+
+      if (sdfRes.ok) {
+        currentSdfData = await sdfRes.text();
+        render3DModel(currentSdfData);
+      } else if (exactSmiles) {
+        // 若 PubChem 該異構物無 3D 檔，直接用帶有 E/Z 標記的 SMILES 在本地演算正確 3D
+        generateLocal3D(exactSmiles);
+      }
       return;
     }
 
@@ -1051,7 +1055,6 @@ async function processMolecule(query, isName = false) {
       infoEl.textContent = err.message;
     }
   }
-}
 
 function generateLocal3D(smiles) {
   const infoEl = document.getElementById("molInfo");
