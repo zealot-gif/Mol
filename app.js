@@ -61,7 +61,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const defaultSmiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C";
   processMolecule(defaultSmiles, false);
-  setTimeout(() => loadSmilesTo2D(defaultSmiles), 150);
+  setTimeout(() => loadSmilesTo2D(defaultSmiles), 100);
 });
 
 function buildPeriodicTable() {
@@ -108,24 +108,7 @@ function saveState() {
 function loadSmilesTo2D(smiles) {
   try {
     if (typeof OCL === "undefined") return;
-    let mol = null;
-
-    try {
-      mol = OCL.Molecule.fromSmiles(smiles);
-    } catch (e1) {
-      try {
-        mol = OCL.Molecule.fromSmiles(smiles.replace(/[\/\\]/g, ""));
-      } catch (e2) {
-        if (currentSdfData) {
-          mol = OCL.Molecule.fromMolfile(currentSdfData);
-          mol.deleteImplicitHydrogens();
-        }
-      }
-    }
-
-    if (!mol) return;
-
-    mol.inventCoordinates();
+    const mol = OCL.Molecule.fromSmiles(smiles);
     mol.ensureHelperArrays(7);
     const nAtoms = mol.getAllAtoms();
     const nBonds = mol.getAllBonds();
@@ -577,7 +560,7 @@ window.addEventListener("mouseup", (e) => {
   draw();
 });
 
-// === 手機觸控支援 ===
+// === 手機觸控支援（單指繪圖 + 雙指旋轉與縮放） ===
 canvas.addEventListener("touchstart", (e) => {
   e.preventDefault();
   if (e.touches.length === 2) {
@@ -922,46 +905,37 @@ function bindUIEvents() {
   });
 
   document.getElementById("syncBtn").addEventListener("click", () => {
-    if (atoms.length === 0) {
-      alert("畫布目前是空的，請先繪製分子結構！");
-      return;
-    }
-
     const molfile = exportCanvasToMolfile();
     if (!molfile) return;
-
-    const infoEl = document.getElementById("molInfo");
-    const badgeEl = document.getElementById("sourceBadge");
-    const formulaEl = document.getElementById("molFormula");
-
     try {
       const oclMol = OCL.Molecule.fromMolfile(molfile);
-      oclMol.ensureHelperArrays(7);
       const smiles = oclMol.toSmiles();
-      const formulaObj = oclMol.getMolecularFormula();
-
-      // 1. 立即在本地端生成 3D 構象（不卡網路、支援任何自創手繪結構）
-      const molFor3D = oclMol.getCompactCopy();
-      molFor3D.addImplicitHydrogens();
-
-      const generator = new OCL.ConformerGenerator(1);
-      const mol3D = generator.getOneConformerAsMolecule(molFor3D);
-
-      if (mol3D) {
-        currentSdfData = mol3D.toMolfileV3();
-        badgeEl.className = "badge local";
-        badgeEl.textContent = "⚡ 本地 3D 轉換";
-        formulaEl.textContent = `${formulaObj.formula} (${formulaObj.relativeWeight.toFixed(2)})`;
-        infoEl.textContent = `自繪結構 ｜ SMILES: ${smiles}`;
-        render3DModel(currentSdfData);
-      } else if (smiles) {
-        // 若本地構象生成器無法處理特殊多環，自動退回雲端檢索
-        processMolecule(smiles, false);
-      }
+      if (smiles) processMolecule(smiles, false);
     } catch (err) {
-      console.error("2D 轉 3D 失敗:", err);
-      alert("無法轉換此結構為 3D，請檢查是否有未連接或重疊的化學鍵");
+      alert("請確認畫布上的化學結構連線完整");
     }
+  });
+
+  document.getElementById("searchInput").addEventListener("keypress", (e) => {
+    if (e.key === "Enter") {
+      const val = e.target.value.trim();
+      if (!val) return;
+      const isSmiles = /^[A-Za-z0-9@+\-\[\]\(\)\\\/%=#$]+$/.test(val) && /[=\(\)\[\]#1-9]/.test(val);
+      processMolecule(val, !isSmiles);
+    }
+  });
+
+  document.getElementById("styleSelect").addEventListener("change", (e) => {
+    apply3DStyle(e.target.value);
+  });
+
+  document.getElementById("exportBtn").addEventListener("click", () => {
+    if (!currentSdfData) return;
+    const blob = new Blob([currentSdfData], { type: "chemical/x-mdl-sdfile" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "molecule_3d.sdf";
+    a.click();
   });
 
   document.getElementById("torsionSlider").addEventListener("input", (e) => {
@@ -1026,162 +1000,6 @@ function bindUIEvents() {
     document.getElementById("torsionSlider").value = 0;
     document.getElementById("torsionAngleLabel").textContent = "0°";
   });
-
-  // === 搜尋框即時推薦引擎 ===
-  const COMMON_MOLECULES = [
-    { zh: "乙烷 (Staggered / Eclipsed)", en: "ethane", formula: "C2H6", tag: "烷烴" },
-    { zh: "丙烷", en: "propane", formula: "C3H8", tag: "烷烴" },
-    { zh: "正丁烷", en: "butane", formula: "C4H10", tag: "烷烴" },
-    { zh: "環己烷", en: "cyclohexane", formula: "C6H12", tag: "環烷" },
-    { zh: "苯", en: "benzene", formula: "C6H6", tag: "芳香烴" },
-    { zh: "甲苯", en: "toluene", formula: "C7H8", tag: "芳香烴" },
-    { zh: "順丁烯二酸 (cis)", en: "maleic acid", formula: "C4H4O4", tag: "Z異構物" },
-    { zh: "反丁烯二酸 (trans)", en: "fumaric acid", formula: "C4H4O4", tag: "E異構物" },
-    { zh: "乙醇 (酒精)", en: "ethanol", formula: "C2H6O", tag: "醇類" },
-    { zh: "乙酸 (醋酸)", en: "acetic acid", formula: "C2H4O2", tag: "羧酸" },
-    { zh: "丙酮", en: "acetone", formula: "C3H6O", tag: "酮類" },
-    { zh: "苯酚 (石炭酸)", en: "phenol", formula: "C6H6O", tag: "酚類" },
-    { zh: "苯甲酸 (安息香酸)", en: "benzoic acid", formula: "C7H6O2", tag: "羧酸" },
-    { zh: "水楊酸", en: "salicylic acid", formula: "C7H6O3", tag: "藥物前驅" },
-    { zh: "阿斯匹靈 (乙醯水楊酸)", en: "aspirin", formula: "C9H8O4", tag: "藥物" },
-    { zh: "普拿疼 (對乙醯氨基酚)", en: "acetaminophen", formula: "C8H9NO2", tag: "藥物" },
-    { zh: "布洛芬", en: "ibuprofen", formula: "C13H18O2", tag: "藥物" },
-    { zh: "咖啡因", en: "caffeine", formula: "C8H10N4O2", tag: "生物鹼" },
-    { zh: "葡萄糖", en: "glucose", formula: "C6H12O6", tag: "單醣" },
-    { zh: "膽固醇", en: "cholesterol", formula: "C27H46O", tag: "類固醇" },
-    { zh: "腎上腺素", en: "epinephrine", formula: "C9H13NO3", tag: "神經傳導" },
-    { zh: "多巴胺", en: "dopamine", formula: "C8H11NO2", tag: "神經傳導" },
-    { zh: "血清素 (5-HT)", en: "serotonin", formula: "C10H12N2O", tag: "神經傳導" },
-    { zh: "青黴素 (盤尼西林)", en: "penicillin G", formula: "C16H18N2O4S", tag: "抗生素" }
-  ];
-
-  const searchInput = document.getElementById("searchInput");
-  const searchDropdown = document.getElementById("searchDropdown");
-  let suggestTimer = null;
-  let activeSuggestIdx = -1;
-
-  function renderSuggestions(items) {
-    if (!items || items.length === 0) {
-      searchDropdown.classList.add("hidden");
-      searchDropdown.innerHTML = "";
-      activeSuggestIdx = -1;
-      return;
-    }
-
-    searchDropdown.innerHTML = "";
-    activeSuggestIdx = -1;
-
-    items.forEach((item) => {
-      const row = document.createElement("div");
-      row.className = "search-item";
-      row.innerHTML = `
-        <div class="search-item-main">
-          <span class="search-item-title">${item.title}</span>
-          <span class="search-item-sub">${item.sub}</span>
-        </div>
-        <span class="search-item-tag">${item.tag}</span>
-      `;
-      row.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        searchInput.value = item.query;
-        searchDropdown.classList.add("hidden");
-        processMolecule(item.query, true);
-      });
-      searchDropdown.appendChild(row);
-    });
-
-    searchDropdown.classList.remove("hidden");
-  }
-
-  async function updateSearchSuggestions(keyword) {
-    const q = keyword.trim().toLowerCase();
-    if (!q) {
-      const featured = COMMON_MOLECULES.slice(0, 6).map((m) => ({
-        title: m.zh,
-        sub: `${m.en} · ${m.formula}`,
-        tag: m.tag,
-        query: m.en
-      }));
-      renderSuggestions(featured);
-      return;
-    }
-
-    const localMatches = COMMON_MOLECULES.filter(
-      (m) => m.zh.toLowerCase().includes(q) || m.en.toLowerCase().includes(q) || m.formula.toLowerCase() === q
-    ).map((m) => ({
-      title: m.zh,
-      sub: `${m.en} · ${m.formula}`,
-      tag: m.tag,
-      query: m.en
-    }));
-
-    renderSuggestions(localMatches);
-
-    if (/^[a-zA-Z0-9\-\s]{2,}$/.test(q)) {
-      try {
-        const res = await fetch(
-          `https://pubchem.ncbi.nlm.nih.gov/rest/autocomplete/compound/${encodeURIComponent(q)}/json?limit=6`
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        const cloudTerms = data?.dictionary_terms?.compound || [];
-
-        const existingQueries = new Set(localMatches.map((m) => m.query.toLowerCase()));
-        const cloudMatches = cloudTerms
-          .filter((name) => !existingQueries.has(name.toLowerCase()))
-          .map((name) => ({
-            title: name,
-            sub: "PubChem 資料庫化合物",
-            tag: "☁ 雲端",
-            query: name
-          }));
-
-        if (searchInput.value.trim().toLowerCase() === q) {
-          renderSuggestions([...localMatches, ...cloudMatches].slice(0, 8));
-        }
-      } catch (err) {}
-    }
-  }
-
-  searchInput.addEventListener("focus", () => updateSearchSuggestions(searchInput.value));
-  searchInput.addEventListener("input", () => {
-    clearTimeout(suggestTimer);
-    suggestTimer = setTimeout(() => updateSearchSuggestions(searchInput.value), 180);
-  });
-  searchInput.addEventListener("blur", () => {
-    setTimeout(() => searchDropdown.classList.add("hidden"), 150);
-  });
-  searchInput.addEventListener("keydown", (e) => {
-    const items = searchDropdown.querySelectorAll(".search-item");
-    if (e.key === "ArrowDown" && items.length > 0) {
-      e.preventDefault();
-      activeSuggestIdx = (activeSuggestIdx + 1) % items.length;
-      items.forEach((el, i) => el.classList.toggle("selected", i === activeSuggestIdx));
-      return;
-    }
-    if (e.key === "ArrowUp" && items.length > 0) {
-      e.preventDefault();
-      activeSuggestIdx = (activeSuggestIdx - 1 + items.length) % items.length;
-      items.forEach((el, i) => el.classList.toggle("selected", i === activeSuggestIdx));
-      return;
-    }
-    if (e.key === "Escape") {
-      searchDropdown.classList.add("hidden");
-      return;
-    }
-    if (e.key === "Enter") {
-      if (activeSuggestIdx >= 0 && items[activeSuggestIdx]) {
-        e.preventDefault();
-        items[activeSuggestIdx].dispatchEvent(new MouseEvent("mousedown"));
-        return;
-      }
-      const val = searchInput.value.trim();
-      if (!val) return;
-      searchDropdown.classList.add("hidden");
-      const isSmiles = /^[A-Za-z0-9@+\-\[\]\(\)\\\/%=#$]+$/.test(val) && /[=\(\)\[\]#1-9]/.test(val);
-      processMolecule(val, !isSmiles);
-    }
-  });
 }
 
 function init3DViewer() {
@@ -1228,13 +1046,13 @@ async function processMolecule(query, isName = false) {
     const encoded = encodeURIComponent(searchQuery);
 
     const propRes = await fetch(
-      `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${type}/${encoded}/property/MolecularFormula,MolecularWeight,IUPACName,IsomericSMILES,CanonicalSMILES,ConnectivitySMILES/JSON`
+      `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/${type}/${encoded}/property/MolecularFormula,MolecularWeight,IUPACName,IsomericSMILES,CanonicalSMILES/JSON`
     );
 
     if (propRes.ok) {
       const propData = await propRes.json();
       const props = propData.PropertyTable.Properties[0];
-      const exactSmiles = props.IsomericSMILES || props.CanonicalSMILES || props.ConnectivitySMILES || props.SMILES;
+      const exactSmiles = props.IsomericSMILES || props.CanonicalSMILES || props.SMILES;
 
       const sdfTarget = exactSmiles ? `smiles/${encodeURIComponent(exactSmiles)}` : `${type}/${encoded}`;
       const sdfRes = await fetch(
@@ -1246,15 +1064,15 @@ async function processMolecule(query, isName = false) {
       formulaEl.textContent = `${props.MolecularFormula} (${props.MolecularWeight})`;
       infoEl.textContent = `${searchQuery} ｜ ${props.IUPACName || ""}`;
 
+      if (isName && exactSmiles) {
+        loadSmilesTo2D(exactSmiles);
+      }
+
       if (sdfRes.ok) {
         currentSdfData = await sdfRes.text();
         render3DModel(currentSdfData);
       } else if (exactSmiles) {
         generateLocal3D(exactSmiles);
-      }
-
-      if (isName && exactSmiles) {
-        loadSmilesTo2D(exactSmiles);
       }
       return;
     }
@@ -1312,6 +1130,7 @@ function parseSdfForRotation(sdfText) {
 
   const countsLine = lines[3];
 
+  // === 模式 A：支援本地演算產生的 V3000 格式 ===
   if (countsLine.includes("V3000")) {
     const parsedAtoms = [];
     const parsedBonds = [];
@@ -1327,6 +1146,7 @@ function parseSdfForRotation(sdfText) {
 
       if (inAtomBlock && trimmed.startsWith("M  V30 ")) {
         const parts = trimmed.slice(7).trim().split(/\s+/);
+        // 格式: index type x y z aamap
         parsedAtoms.push({
           idx: parseInt(parts[0], 10) - 1,
           el: parts[1],
@@ -1336,6 +1156,7 @@ function parseSdfForRotation(sdfText) {
         });
       } else if (inBondBlock && trimmed.startsWith("M  V30 ")) {
         const parts = trimmed.slice(7).trim().split(/\s+/);
+        // 格式: index type atom1 atom2
         parsedBonds.push({
           order: parseInt(parts[1], 10),
           a1: parseInt(parts[2], 10) - 1,
@@ -1346,6 +1167,7 @@ function parseSdfForRotation(sdfText) {
     return parsedAtoms.length > 0 ? { parsedAtoms, parsedBonds } : null;
   }
 
+  // === 模式 B：支援 PubChem 雲端回傳的 V2000 格式 ===
   const nAtoms = parseInt(countsLine.slice(0, 3).trim(), 10);
   const nBonds = parseInt(countsLine.slice(3, 6).trim(), 10);
   if (isNaN(nAtoms) || isNaN(nBonds)) return null;
