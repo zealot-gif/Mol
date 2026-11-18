@@ -797,6 +797,117 @@ function bindUIEvents() {
     draw();
   });
 
+// === 1. ✨ 自動重整結構（標準鍵角與正六邊形優化） ===
+  let chairFlipState = false;
+
+  document.getElementById("btnClean").addEventListener("click", () => {
+    if (atoms.length === 0) return;
+    const molfile = exportCanvasToMolfile();
+    if (!molfile) return;
+
+    try {
+      // 保留原有的孤電子對紀錄（依原子順序對應）
+      const savedLonePairs = atoms.map((a) => a.lonePairs || 0);
+
+      const mol = OCL.Molecule.fromMolfile(molfile);
+      // 強制重新計算最美觀的標準 2D 平面座標（正六邊形、標準 120 度鍵角）
+      mol.inventCoordinates();
+      mol.ensureHelperArrays(7);
+
+      const nAtoms = mol.getAllAtoms();
+      const nBonds = mol.getAllBonds();
+      const newAtoms = [];
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
+      for (let i = 0; i < nAtoms; i++) {
+        const x = mol.getAtomX(i) * 34;
+        const y = mol.getAtomY(i) * 34;
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+        newAtoms.push({
+          id: i + 1,
+          x, y,
+          el: mol.getAtomLabel(i) || "C",
+          charge: mol.getAtomCharge(i) || 0,
+          lonePairs: savedLonePairs[i] || 0
+        });
+      }
+
+      // 保持在原本分子的中心位置，不會亂跑
+      const oldCenterX = atoms.reduce((s, a) => s + a.x, 0) / atoms.length;
+      const oldCenterY = atoms.reduce((s, a) => s + a.y, 0) / atoms.length;
+      const offsetX = oldCenterX - (minX + maxX) / 2;
+      const offsetY = oldCenterY - (minY + maxY) / 2;
+      newAtoms.forEach((a) => { a.x += offsetX; a.y += offsetY; });
+
+      const newBonds = [];
+      for (let i = 0; i < nBonds; i++) {
+        newBonds.push({
+          a1: mol.getBondAtom(0, i) + 1,
+          a2: mol.getBondAtom(1, i) + 1,
+          order: mol.getBondOrder(i) || 1
+        });
+      }
+
+      saveState();
+      atoms = newAtoms;
+      bonds = newBonds;
+      draw();
+    } catch (err) {
+      alert("無法自動重整此結構，請確認化學鍵連線是否有效");
+    }
+  });
+
+  // === 2. 🪑 轉換為環己烷椅型構象（Chair Conformation + 環翻轉） ===
+  document.getElementById("btnChair").addEventListener("click", () => {
+    const ring6 = findSixMemberedRing();
+    if (!ring6) {
+      alert("畫布中找不到封閉的六員環結構！");
+      return;
+    }
+
+    saveState();
+    const cx = ring6.reduce((s, a) => s + a.x, 0) / 6;
+    const cy = ring6.reduce((s, a) => s + a.y, 0) / 6;
+
+    // 經典有機化學教科書角度的椅型 6 頂點相對座標（支援兩種翻轉構象）
+    const chairOffsets = !chairFlipState
+      ? [
+          { dx: -46, dy:  10 }, // C1 (左下)
+          { dx: -14, dy: -16 }, // C2 (左上)
+          { dx:  26, dy:  -6 }, // C3 (中上)
+          { dx:  46, dy: -22 }, // C4 (右上尖端)
+          { dx:  14, dy:  16 }, // C5 (右下)
+          { dx: -26, dy:   6 }  // C6 (中下)
+        ]
+      : [
+          { dx: -46, dy: -22 }, // 環翻轉後 C1 (左上尖端)
+          { dx: -14, dy:  16 }, // C2 (左下)
+          { dx:  26, dy:   6 }, // C3 (中下)
+          { dx:  46, dy:  10 }, // C4 (右下)
+          { dx:  14, dy: -16 }, // C5 (右上)
+          { dx: -26, dy:  -6 }  // C6 (中上)
+        ];
+
+    chairFlipState = !chairFlipState;
+
+    // 計算每個環上原子原本的幾何中心方向，同步平移連接在環上的取代基（如 -OH, -CH3）
+    ring6.forEach((atom, idx) => {
+      const targetX = cx + chairOffsets[idx].dx;
+      const targetY = cy + chairOffsets[idx].dy;
+      const moveX = targetX - atom.x;
+      const moveY = targetY - atom.y;
+
+      // 找出只連在這個環原子外側的取代基一起移動
+      moveSubstituents(atom.id, new Set(ring6.map((r) => r.id)), moveX, moveY);
+
+      atom.x = targetX;
+      atom.y = targetY;
+    });
+
+    draw();
+  });
+  
   document.getElementById("btnZoomIn").addEventListener("click", () => {
     zoom = Math.min(2.5, zoom + 0.1);
     document.getElementById("zoomBadge").textContent = `${Math.round(zoom * 100)}%`;
@@ -990,4 +1101,58 @@ function apply3DStyle(styleType) {
     viewer3D.setStyle({}, { line: { linewidth: 2 } });
   }
   viewer3D.render();
+}
+
+// 深度優先搜尋 (DFS) 找出畫布上的第一個六員環（依環繞順序排列）
+function findSixMemberedRing() {
+  const adj = new Map();
+  atoms.forEach((a) => adj.set(a.id, []));
+  bonds.forEach((b) => {
+    if (adj.has(b.a1) && adj.has(b.a2)) {
+      adj.get(b.a1).push(b.a2);
+      adj.get(b.a2).push(b.a1);
+    }
+  });
+
+  function dfs(startId, currId, path) {
+    if (path.length === 6) {
+      return adj.get(currId).includes(startId) ? path : null;
+    }
+    for (const nextId of adj.get(currId)) {
+      if (!path.includes(nextId)) {
+        const res = dfs(startId, nextId, [...path, nextId]);
+        if (res) return res;
+      }
+    }
+    return null;
+  }
+
+  for (const a of atoms) {
+    const cycleIds = dfs(a.id, a.id, [a.id]);
+    if (cycleIds) {
+      return cycleIds.map((id) => atoms.find((atom) => atom.id === id));
+    }
+  }
+  return null;
+}
+
+// 移動附著在環上的取代基原子，保持鍵長不變形
+function moveSubstituents(rootId, ringIdSet, dx, dy) {
+  const visited = new Set([...ringIdSet, rootId]);
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const curr = queue.shift();
+    bonds.forEach((b) => {
+      const neighbor = b.a1 === curr ? b.a2 : b.a2 === curr ? b.a1 : null;
+      if (neighbor && !visited.has(neighbor)) {
+        visited.add(neighbor);
+        const atomObj = atoms.find((a) => a.id === neighbor);
+        if (atomObj) {
+          atomObj.x += dx;
+          atomObj.y += dy;
+        }
+        queue.push(neighbor);
+      }
+    });
+  }
 }
