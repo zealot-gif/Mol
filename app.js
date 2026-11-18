@@ -1129,9 +1129,48 @@ function parseSdfForRotation(sdfText) {
   if (lines.length < 4) return null;
 
   const countsLine = lines[3];
+
+  // === 模式 A：支援本地演算產生的 V3000 格式 ===
+  if (countsLine.includes("V3000")) {
+    const parsedAtoms = [];
+    const parsedBonds = [];
+    let inAtomBlock = false;
+    let inBondBlock = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed === "M  V30 BEGIN ATOM") { inAtomBlock = true; continue; }
+      if (trimmed === "M  V30 END ATOM") { inAtomBlock = false; continue; }
+      if (trimmed === "M  V30 BEGIN BOND") { inBondBlock = true; continue; }
+      if (trimmed === "M  V30 END BOND") { inBondBlock = false; continue; }
+
+      if (inAtomBlock && trimmed.startsWith("M  V30 ")) {
+        const parts = trimmed.slice(7).trim().split(/\s+/);
+        // 格式: index type x y z aamap
+        parsedAtoms.push({
+          idx: parseInt(parts[0], 10) - 1,
+          el: parts[1],
+          x: parseFloat(parts[2]),
+          y: parseFloat(parts[3]),
+          z: parseFloat(parts[4])
+        });
+      } else if (inBondBlock && trimmed.startsWith("M  V30 ")) {
+        const parts = trimmed.slice(7).trim().split(/\s+/);
+        // 格式: index type atom1 atom2
+        parsedBonds.push({
+          order: parseInt(parts[1], 10),
+          a1: parseInt(parts[2], 10) - 1,
+          a2: parseInt(parts[3], 10) - 1
+        });
+      }
+    }
+    return parsedAtoms.length > 0 ? { parsedAtoms, parsedBonds } : null;
+  }
+
+  // === 模式 B：支援 PubChem 雲端回傳的 V2000 格式 ===
   const nAtoms = parseInt(countsLine.slice(0, 3).trim(), 10);
   const nBonds = parseInt(countsLine.slice(3, 6).trim(), 10);
-  if (isNaN(nAtoms) || isNaN(nBonds) || countsLine.includes("V3000")) return null;
+  if (isNaN(nAtoms) || isNaN(nBonds)) return null;
 
   const parsedAtoms = [];
   for (let i = 0; i < nAtoms; i++) {
